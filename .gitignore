@@ -1,6 +1,6 @@
 node_modules/
 frontend/node_modules/
-frontend/dist/
+# frontend/dist is committed so Railway serves pre-built files directly
 backend/staff.db
 backend/uploads/
 .env
