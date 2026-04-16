@@ -1,0 +1,7 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+backend/staff.db
+backend/uploads/
+.env
+*.bat
