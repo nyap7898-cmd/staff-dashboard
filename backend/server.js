@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { init } = require('./db');
+const { notify } = require('./notify');
 
 async function main() {
   const db = await init();
@@ -21,15 +22,18 @@ async function main() {
     app.use(express.static(frontendDist));
   }
 
-  app.use('/api/staff', require('./routes/staff')(db));
-  app.use('/api/attendance', require('./routes/attendance')(db));
-  app.use('/api/leaves', require('./routes/leaves')(db));
+  app.use('/api/staff', require('./routes/staff')(db, notify));
+  app.use('/api/attendance', require('./routes/attendance')(db, notify));
+  app.use('/api/leaves', require('./routes/leaves')(db, notify));
   app.use('/api/overview', require('./routes/overview')(db));
+  app.use('/api/audit', require('./routes/audit')(db));
 
   app.post('/api/auth/login', (req, res) => {
     const { pin } = req.body;
     if (pin === process.env.DIRECTOR_PIN) {
-      res.json({ success: true, name: 'Director' });
+      res.json({ success: true, role: 'director', name: 'Director' });
+    } else if (pin === process.env.HR_PIN) {
+      res.json({ success: true, role: 'hr', name: 'HR Manager' });
     } else {
       res.status(401).json({ success: false, message: 'Invalid PIN' });
     }

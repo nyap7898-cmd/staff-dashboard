@@ -8,10 +8,10 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-module.exports = function (db) {
+module.exports = function (db, notify) {
   const router = express.Router();
 
-  // GET leave balances — must come before /:id routes
+  // GET leave balances
   router.get('/balance', (req, res) => {
     const year = String(new Date().getFullYear());
     const staff = db.prepare('SELECT * FROM staff WHERE is_active = 1 ORDER BY name').all();
@@ -71,30 +71,54 @@ module.exports = function (db) {
   // POST submit leave application
   router.post('/', upload.single('document'), (req, res) => {
     const { staff_id, leave_type, start_date, end_date, days, reason } = req.body;
+    const role = req.headers['x-user-role'] || 'unknown';
     const document_path = req.file ? req.file.filename : null;
     const now = new Date().toISOString();
     const result = db.prepare(`
       INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, document_path, status, applied_at)
       VALUES (?,?,?,?,?,?,?,'pending',?)
     `).run(staff_id, leave_type, start_date, end_date, days, reason || null, document_path, now);
+
+    const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(staff_id);
+    const staffName = staffRow ? staffRow.name : `Staff #${staff_id}`;
+    const details = `${staffName} | ${leave_type} | ${start_date} to ${end_date} (${days} day(s))`;
+
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Applied', details);
+
+    if (role === 'hr') {
+      notify(`📋 <b>Leave Application Submitted by HR</b>\n👤 ${staffName}\n🏷️ Type: ${leave_type}\n📅 ${start_date} → ${end_date} (${days} day(s))\n📝 ${reason || 'No reason given'}`);
+    }
+
     res.json({ success: true, id: result.lastInsertRowid });
   });
 
   // PUT approve
   router.put('/:id/approve', (req, res) => {
     const { director_notes } = req.body || {};
+    const role = req.headers['x-user-role'] || 'unknown';
     const now = new Date().toISOString();
     db.prepare(`UPDATE leave_requests SET status='approved', decided_at=?, director_notes=? WHERE id=?`)
       .run(now, director_notes || null, req.params.id);
+
+    const lr = db.prepare(`SELECT lr.*, s.name FROM leave_requests lr JOIN staff s ON s.id=lr.staff_id WHERE lr.id=?`).get(req.params.id);
+    const details = lr ? `${lr.name} | ${lr.leave_type} | ${lr.start_date} to ${lr.end_date}` : `Leave #${req.params.id}`;
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Approved', details);
+
     res.json({ success: true });
   });
 
   // PUT reject
   router.put('/:id/reject', (req, res) => {
     const { director_notes } = req.body || {};
+    const role = req.headers['x-user-role'] || 'unknown';
     const now = new Date().toISOString();
     db.prepare(`UPDATE leave_requests SET status='rejected', decided_at=?, director_notes=? WHERE id=?`)
       .run(now, director_notes || null, req.params.id);
+
+    const lr = db.prepare(`SELECT lr.*, s.name FROM leave_requests lr JOIN staff s ON s.id=lr.staff_id WHERE lr.id=?`).get(req.params.id);
+    const details = lr ? `${lr.name} | ${lr.leave_type} | ${lr.start_date} to ${lr.end_date}` : `Leave #${req.params.id}`;
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Rejected', details);
+
     res.json({ success: true });
   });
 

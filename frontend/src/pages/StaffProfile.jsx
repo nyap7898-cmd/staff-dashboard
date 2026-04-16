@@ -33,6 +33,7 @@ export default function StaffProfile() {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const role = localStorage.getItem('user_role') || 'hr'
 
   useEffect(() => {
     axios.get('/api/staff').then(r => {
@@ -165,10 +166,12 @@ export default function StaffProfile() {
                       <span className="text-gray-700 text-right max-w-[60%] break-all">{value}</span>
                     </div>
                   ))}
-                  <button onClick={startEdit}
-                    className="w-full mt-4 border border-blue-200 text-blue-600 text-sm py-2 rounded-lg hover:bg-blue-50 transition-colors">
-                    Edit Details
-                  </button>
+                  {role === 'director' && (
+                    <button onClick={startEdit}
+                      className="w-full mt-4 border border-blue-200 text-blue-600 text-sm py-2 rounded-lg hover:bg-blue-50 transition-colors">
+                      Edit Details
+                    </button>
+                  )}
                 </div>
               )}
             </div>

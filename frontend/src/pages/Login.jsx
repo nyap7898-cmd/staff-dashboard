@@ -16,6 +16,9 @@ export default function Login() {
       const res = await axios.post('/api/auth/login', { pin })
       if (res.data.success) {
         localStorage.setItem('director_auth', '1')
+        localStorage.setItem('user_role', res.data.role)
+        localStorage.setItem('user_name', res.data.name)
+        axios.defaults.headers.common['x-user-role'] = res.data.role
         navigate('/overview')
       }
     } catch {
@@ -36,7 +39,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit}>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Director PIN
+            Access PIN
           </label>
           <input
             type="password"

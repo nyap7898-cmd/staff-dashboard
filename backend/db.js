@@ -144,6 +144,14 @@ function createTables(db) {
       decided_at TEXT,
       director_notes TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+      role TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details TEXT
+    );
   `);
   db._save();
 }
