@@ -16,11 +16,9 @@ async function main() {
   app.use(express.json());
   app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-  // Serve built React frontend in production
-  if (process.env.NODE_ENV === 'production') {
-    const frontendDist = path.join(__dirname, '../frontend/dist');
-    app.use(express.static(frontendDist));
-  }
+  // Serve built React frontend
+  const frontendDist = path.join(__dirname, '../frontend/dist');
+  app.use(express.static(frontendDist));
 
   app.use('/api/staff', require('./routes/staff')(db, notify));
   app.use('/api/attendance', require('./routes/attendance')(db, notify));
@@ -40,12 +38,9 @@ async function main() {
   });
 
   // Catch-all: send React app for any non-API route
-  if (process.env.NODE_ENV === 'production') {
-    const frontendDist = path.join(__dirname, '../frontend/dist');
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(frontendDist, 'index.html'));
-    });
-  }
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
 
   app.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);
