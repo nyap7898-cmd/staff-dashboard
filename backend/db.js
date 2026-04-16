@@ -2,7 +2,8 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'staff.db');
+// In production (Railway), DB_PATH env var points to the persistent volume
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'staff.db');
 
 // Statement wrapper — gives better-sqlite3-like .run() / .get() / .all()
 class Statement {
