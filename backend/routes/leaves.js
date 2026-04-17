@@ -27,12 +27,14 @@ module.exports = function (db, notify) {
       const usage = {};
       for (const r of approved) usage[r.leave_type] = r.used;
 
+      const annualUsed = (usage.annual || 0) + (s.annual_opening_used || 0);
+      const mcUsed = (usage.mc || 0) + (s.mc_opening_used || 0);
       return {
         ...s,
-        annual_used: usage.annual || 0,
-        annual_remaining: s.annual_entitlement - (usage.annual || 0),
-        mc_used: usage.mc || 0,
-        mc_remaining: s.mc_entitlement - (usage.mc || 0),
+        annual_used: annualUsed,
+        annual_remaining: s.annual_entitlement - annualUsed,
+        mc_used: mcUsed,
+        mc_remaining: s.mc_entitlement - mcUsed,
         emergency_used: usage.emergency || 0,
         unpaid_used: usage.unpaid || 0,
       };

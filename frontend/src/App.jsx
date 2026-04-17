@@ -10,6 +10,7 @@ import LeaveApproval from './pages/LeaveApproval.jsx'
 import LeaveApplyForm from './pages/LeaveApplyForm.jsx'
 import StaffProfile from './pages/StaffProfile.jsx'
 import AuditLog from './pages/AuditLog.jsx'
+import LeaveSetup from './pages/LeaveSetup.jsx'
 
 function PrivateRoute({ children }) {
   const auth = localStorage.getItem('director_auth')
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="leave-apply" element={<LeaveApplyForm />} />
           <Route path="staff" element={<StaffProfile />} />
           <Route path="audit-log" element={<DirectorRoute><AuditLog /></DirectorRoute>} />
+          <Route path="leave-setup" element={<LeaveSetup />} />
         </Route>
       </Routes>
     </BrowserRouter>

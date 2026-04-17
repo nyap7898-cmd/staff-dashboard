@@ -116,6 +116,8 @@ function createTables(db) {
       date_joined TEXT,
       annual_entitlement INTEGER DEFAULT 15,
       mc_entitlement INTEGER DEFAULT 14,
+      annual_opening_used INTEGER DEFAULT 0,
+      mc_opening_used INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
 
@@ -153,7 +155,9 @@ function createTables(db) {
       details TEXT
     );
   `);
-  db._save();
+  // Add new columns to existing DBs (safe — ignored if already exist)
+  try { db._db.exec(`ALTER TABLE staff ADD COLUMN annual_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE staff ADD COLUMN mc_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
 }
 
 function seedData(db) {

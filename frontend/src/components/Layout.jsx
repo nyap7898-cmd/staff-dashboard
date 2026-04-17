@@ -4,6 +4,7 @@ const directorNav = [
   { to: '/overview', label: 'Overview', icon: '📊' },
   { to: '/attendance', label: 'Attendance', icon: '✅' },
   { to: '/leave-balance', label: 'Leave Balance', icon: '📅' },
+  { to: '/leave-setup', label: 'Leave Setup', icon: '⚙️' },
   { to: '/leave-approval', label: 'Leave Approval', icon: '📋' },
   { to: '/leave-apply', label: 'Apply Leave', icon: '✏️' },
   { to: '/staff', label: 'Staff Profiles', icon: '👤' },
@@ -14,6 +15,7 @@ const hrNav = [
   { to: '/overview', label: 'Overview', icon: '📊' },
   { to: '/attendance', label: 'Attendance', icon: '✅' },
   { to: '/leave-balance', label: 'Leave Balance', icon: '📅' },
+  { to: '/leave-setup', label: 'Leave Setup', icon: '⚙️' },
   { to: '/leave-apply', label: 'Apply Leave', icon: '✏️' },
   { to: '/staff', label: 'Staff Profiles', icon: '👤' },
 ]

@@ -14,6 +14,25 @@ module.exports = function (db, notify) {
     res.json(staff);
   });
 
+  // PUT bulk update leave opening balances
+  router.put('/leave-opening', (req, res) => {
+    const { updates } = req.body; // [{ id, annual_opening_used, mc_opening_used }, ...]
+    const role = req.headers['x-user-role'] || 'unknown';
+    if (!Array.isArray(updates)) return res.status(400).json({ error: 'Invalid payload' });
+
+    const stmt = db.prepare(`UPDATE staff SET annual_opening_used=?, mc_opening_used=? WHERE id=?`);
+    for (const u of updates) {
+      stmt.run(u.annual_opening_used ?? 0, u.mc_opening_used ?? 0, u.id);
+    }
+
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Opening Balance Updated', `${updates.length} staff updated`);
+    if (role === 'hr') {
+      notify(`📊 <b>Leave Opening Balances Updated by HR</b>\n${updates.length} staff records updated`);
+    }
+
+    res.json({ success: true });
+  });
+
   router.put('/:id', (req, res) => {
     const { name, ic_number, email, phone, department, job_title, date_joined, annual_entitlement, mc_entitlement } = req.body;
     const role = req.headers['x-user-role'] || 'unknown';
