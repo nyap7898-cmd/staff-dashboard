@@ -15,6 +15,7 @@ export default function LeaveApplyForm() {
   const [form, setForm] = useState({
     staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '',
   })
+  const [halfDay, setHalfDay] = useState(false)
   const [file, setFile] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -24,10 +25,13 @@ export default function LeaveApplyForm() {
     axios.get('/api/staff').then(r => setStaff(r.data))
   }, [])
 
-  const days = daysBetween(form.start_date, form.end_date)
+  const isSameDay = form.start_date && form.end_date && form.start_date === form.end_date
+  const fullDays = daysBetween(form.start_date, form.end_date)
+  const days = isSameDay && halfDay ? 0.5 : fullDays
 
   function update(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
+    if (field === 'start_date' || field === 'end_date') setHalfDay(false)
     setSuccess(false)
     setError('')
   }
@@ -124,10 +128,26 @@ export default function LeaveApplyForm() {
             </div>
           </div>
 
+          {/* Half day toggle — only shows when same day selected */}
+          {isSameDay && (
+            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+              <input
+                type="checkbox"
+                id="halfday"
+                checked={halfDay}
+                onChange={e => setHalfDay(e.target.checked)}
+                className="w-4 h-4 accent-amber-500 cursor-pointer"
+              />
+              <label htmlFor="halfday" className="text-sm font-medium text-amber-800 cursor-pointer">
+                Half Day Leave (0.5 day)
+              </label>
+            </div>
+          )}
+
           {/* Days auto-calculated */}
           {days > 0 && (
             <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5 text-sm text-blue-700 font-medium">
-              Total days: {days} day{days !== 1 ? 's' : ''}
+              Total: <strong>{days}</strong> {days === 0.5 ? 'half day' : `day${days !== 1 ? 's' : ''}`}
             </div>
           )}
 

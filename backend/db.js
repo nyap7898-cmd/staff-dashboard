@@ -138,7 +138,7 @@ function createTables(db) {
       leave_type TEXT CHECK(leave_type IN ('annual','mc','emergency','unpaid','maternity','paternity')),
       start_date TEXT NOT NULL,
       end_date TEXT NOT NULL,
-      days INTEGER NOT NULL,
+      days REAL NOT NULL,
       reason TEXT,
       document_path TEXT,
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
