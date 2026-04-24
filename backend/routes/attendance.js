@@ -301,10 +301,10 @@ module.exports = function (db, notify) {
         const lunch_in  = parseTimeFromCell(row[pmInCol]);
         const check_out = parseTimeFromCell(row[pmOutCol]);
 
-        if (check_in || check_out) {
-          timesMap[sheetName.toLowerCase()] = { check_in, lunch_out, lunch_in, check_out };
-          break; // first data row is enough (single-day report)
-        }
+        // Store by both sheet name (lowercase) AND trimmed lowercase — covers all naming variations
+        const key = sheetName.toLowerCase().trim();
+        timesMap[key] = { check_in, lunch_out, lunch_in, check_out };
+        break; // first data row is enough (single-day report); store even if times are null
       }
     }
     return timesMap;
@@ -349,9 +349,11 @@ module.exports = function (db, notify) {
     }
 
     const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
-    // Get all 4 times from individual per-person sheets (wrapped in try-catch so any parse error doesn't kill the whole import)
+    // Get all 4 times from individual per-person sheets
+    // IMPORTANT: we use these times — not Summary sheet actual_hrs — to determine Present/Absent
+    // because the Summary sheet actual_hrs can be 0 even for present staff (e.g. no overtime)
     let timesMap = {};
-    try { timesMap = extractTimesFromPersonSheets(wb); } catch (e) { /* times unavailable — still import presence/absence */ }
+    try { timesMap = extractTimesFromPersonSheets(wb); } catch (e) { /* fall through — times unavailable */ }
 
     const records = [];
     for (let r = dataStart; r < rows.length; r++) {
@@ -360,22 +362,20 @@ module.exports = function (db, notify) {
       const rawName = String(row[nameCol] || '').trim();
 
       if (!rawName) continue;
-      // Skip if "No" column isn't a valid small integer (e.g. skip total/summary rows)
+      // Skip summary/total rows (No must be a small positive integer)
       const noNum = parseFloat(noVal);
       if (isNaN(noNum) || noNum <= 0 || noNum > 9000) continue;
 
-      const actualHrs = parseFloat(String(row[actualCol] || '0').replace(/[^\d.]/g, '')) || 0;
-      // AB column: "1" means absent. Fallback: actualHrs === 0
-      const abVal = abCol >= 0 ? String(row[abCol] || '').trim() : '';
-      const isAbsent = actualHrs === 0 || abVal === '1';
-      const status = isAbsent ? 'absent' : 'present';
-
       // Get all 4 times from the person's individual sheet
-      const times = isAbsent ? null : timesMap[rawName.toLowerCase()];
+      const times = timesMap[rawName.toLowerCase()];
       const check_in  = times?.check_in  || null;
       const lunch_out = times?.lunch_out || null;
       const lunch_in  = times?.lunch_in  || null;
       const check_out = times?.check_out || null;
+
+      // Present = has check-in time in their individual sheet
+      // Absent = no individual sheet found OR no times in it
+      const status = check_in ? 'present' : 'absent';
 
       const matched = matchStaffByName(rawName, allStaff);
       records.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, lunch_out, lunch_in, check_out, status });
