@@ -11,6 +11,7 @@ export default function LeaveApproval() {
   const [pending, setPending] = useState([])
   const [recent, setRecent] = useState([])
   const [acting, setActing] = useState({})
+  const [expanded, setExpanded] = useState(null)
 
   function load() {
     axios.get('/api/leaves?status=pending').then(r => setPending(r.data))
@@ -33,6 +34,7 @@ export default function LeaveApproval() {
     await axios.put(`/api/leaves/${id}/${action}`)
     load()
     setActing(prev => { const n = { ...prev }; delete n[id]; return n })
+    setExpanded(null)
   }
 
   return (
@@ -69,33 +71,65 @@ export default function LeaveApproval() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {pending.map(l => (
-                  <tr key={l.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
-                    <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
-                    <td className="px-4 py-3 text-gray-600">{fmt(l.start_date)}</td>
-                    <td className="px-4 py-3 text-gray-600">{fmt(l.end_date)}</td>
-                    <td className="px-4 py-3 text-center font-medium">{l.days}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{l.reason || '—'}</td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{fmt(l.applied_at)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => decide(l.id, 'approve')}
-                          disabled={!!acting[l.id]}
-                          className="text-xs bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
-                        >
-                          {acting[l.id] === 'approve' ? '...' : 'Approve'}
-                        </button>
-                        <button
-                          onClick={() => decide(l.id, 'reject')}
-                          disabled={!!acting[l.id]}
-                          className="text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
-                        >
-                          {acting[l.id] === 'reject' ? '...' : 'Reject'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={l.id}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setExpanded(expanded === l.id ? null : l.id)}
+                    >
+                      <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
+                      <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
+                      <td className="px-4 py-3 text-gray-600">{fmt(l.start_date)}</td>
+                      <td className="px-4 py-3 text-gray-600">{fmt(l.end_date)}</td>
+                      <td className="px-4 py-3 text-center font-medium">{l.days}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-[180px] truncate">{l.reason || '—'}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{fmt(l.applied_at)}</td>
+                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => decide(l.id, 'approve')}
+                            disabled={!!acting[l.id]}
+                            className="text-xs bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          >
+                            {acting[l.id] === 'approve' ? '...' : 'Approve'}
+                          </button>
+                          <button
+                            onClick={() => decide(l.id, 'reject')}
+                            disabled={!!acting[l.id]}
+                            className="text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+                          >
+                            {acting[l.id] === 'reject' ? '...' : 'Reject'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {expanded === l.id && (
+                      <tr key={`${l.id}-detail`} className="bg-blue-50">
+                        <td colSpan={8} className="px-6 py-4">
+                          <div className="text-sm space-y-1 text-gray-700">
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Staff:</span>{l.name} ({l.department})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Leave type:</span>{l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1)} Leave</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Applied:</span>{fmt(l.applied_at)}</div>
+                            {l.document_path && (
+                              <div>
+                                <span className="font-medium text-gray-500 w-28 inline-block">Document:</span>
+                                <a
+                                  href={`/uploads/${l.document_path}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline text-sm"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  📎 View supporting document
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>
