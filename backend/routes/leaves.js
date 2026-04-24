@@ -1,12 +1,8 @@
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, '../uploads'),
-  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
-});
-const upload = multer({ storage });
+// Store files in memory — we save them to the SQLite DB (persistent volume), not disk
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 module.exports = function (db, notify) {
   const router = express.Router();
@@ -47,7 +43,9 @@ module.exports = function (db, notify) {
   router.get('/staff/:id', (req, res) => {
     const year = String(new Date().getFullYear());
     const records = db.prepare(`
-      SELECT * FROM leave_requests WHERE staff_id=? AND substr(start_date,1,4)=? ORDER BY applied_at DESC
+      SELECT id, staff_id, leave_type, start_date, end_date, days, reason,
+             document_name, status, applied_at, decided_at, director_notes
+      FROM leave_requests WHERE staff_id=? AND substr(start_date,1,4)=? ORDER BY applied_at DESC
     `).all(req.params.id, year);
     res.json(records);
   });
@@ -55,31 +53,48 @@ module.exports = function (db, notify) {
   // GET leave requests — filtered by status
   router.get('/', (req, res) => {
     const { status } = req.query;
+    // Exclude document_data (large base64) — use /api/leaves/:id/document to fetch the file
+    const cols = `lr.id, lr.staff_id, lr.leave_type, lr.start_date, lr.end_date, lr.days,
+      lr.reason, lr.document_name, lr.status, lr.applied_at, lr.decided_at, lr.director_notes,
+      s.name, s.department`;
     let records;
     if (status) {
       records = db.prepare(`
-        SELECT lr.*, s.name, s.department FROM leave_requests lr
+        SELECT ${cols} FROM leave_requests lr
         JOIN staff s ON s.id=lr.staff_id WHERE lr.status=? ORDER BY lr.applied_at DESC
       `).all(status);
     } else {
       records = db.prepare(`
-        SELECT lr.*, s.name, s.department FROM leave_requests lr
+        SELECT ${cols} FROM leave_requests lr
         JOIN staff s ON s.id=lr.staff_id ORDER BY lr.applied_at DESC
       `).all();
     }
     res.json(records);
   });
 
+  // GET document for a leave request
+  router.get('/:id/document', (req, res) => {
+    const lr = db.prepare('SELECT document_data, document_mime, document_name FROM leave_requests WHERE id=?').get(req.params.id);
+    if (!lr || !lr.document_data) return res.status(404).json({ error: 'No document found' });
+    const buf = Buffer.from(lr.document_data, 'base64');
+    res.setHeader('Content-Type', lr.document_mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${lr.document_name || 'document'}"`);
+    res.send(buf);
+  });
+
   // POST submit leave application
   router.post('/', upload.single('document'), (req, res) => {
     const { staff_id, leave_type, start_date, end_date, days, reason } = req.body;
     const role = req.headers['x-user-role'] || 'unknown';
-    const document_path = req.file ? req.file.filename : null;
+    // Store file as base64 in DB (survives Railway deploys)
+    const document_data = req.file ? req.file.buffer.toString('base64') : null;
+    const document_mime = req.file ? req.file.mimetype : null;
+    const document_name = req.file ? req.file.originalname : null;
     const now = new Date().toISOString();
     const result = db.prepare(`
-      INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, document_path, status, applied_at)
-      VALUES (?,?,?,?,?,?,?,'pending',?)
-    `).run(staff_id, leave_type, start_date, end_date, days, reason || null, document_path, now);
+      INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, document_data, document_mime, document_name, status, applied_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'pending',?)
+    `).run(staff_id, leave_type, start_date, end_date, days, reason || null, document_data, document_mime, document_name, now);
 
     const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(staff_id);
     const staffName = staffRow ? staffRow.name : `Staff #${staff_id}`;

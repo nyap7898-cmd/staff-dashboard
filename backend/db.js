@@ -158,6 +158,9 @@ function createTables(db) {
   // Add new columns to existing DBs (safe — ignored if already exist)
   try { db._db.exec(`ALTER TABLE staff ADD COLUMN annual_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
   try { db._db.exec(`ALTER TABLE staff ADD COLUMN mc_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_data TEXT`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_mime TEXT`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_name TEXT`); db._save(); } catch {}
 }
 
 function seedData(db) {

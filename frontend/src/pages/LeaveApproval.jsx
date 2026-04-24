@@ -112,17 +112,17 @@ export default function LeaveApproval() {
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''})</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Applied:</span>{fmt(l.applied_at)}</div>
-                            {l.document_path && (
+                            {l.document_name && (
                               <div>
                                 <span className="font-medium text-gray-500 w-28 inline-block">Document:</span>
                                 <a
-                                  href={`/uploads/${l.document_path}`}
+                                  href={`/api/leaves/${l.id}/document`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 hover:underline text-sm"
                                   onClick={e => e.stopPropagation()}
                                 >
-                                  📎 View supporting document
+                                  📎 {l.document_name}
                                 </a>
                               </div>
                             )}
@@ -182,17 +182,17 @@ export default function LeaveApproval() {
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Decision:</span><Badge status={l.status} /></div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Decided:</span>{fmt(l.decided_at)}</div>
-                            {l.document_path && (
+                            {l.document_name && (
                               <div>
                                 <span className="font-medium text-gray-500 w-28 inline-block">Document:</span>
                                 <a
-                                  href={`/uploads/${l.document_path}`}
+                                  href={`/api/leaves/${l.id}/document`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 hover:underline text-sm"
                                   onClick={e => e.stopPropagation()}
                                 >
-                                  📎 View supporting document
+                                  📎 {l.document_name}
                                 </a>
                               </div>
                             )}
