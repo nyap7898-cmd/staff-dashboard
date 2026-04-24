@@ -217,5 +217,116 @@ module.exports = function (db, notify) {
     }
   });
 
+  // ─── Thumbprint machine format helpers ───────────────────────────────────────
+
+  function detectMachineFormat(wb) {
+    // Look for a sheet named "Logs" or "Log" or "Detail"
+    const logName = wb.SheetNames.find(n => /log|detail/i.test(n));
+    if (!logName) return null;
+    const sheet = wb.Sheets[logName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    // Row index 2 should contain the period string like "2026/02/27 ~ 02/27"
+    if (rows.length < 4) return null;
+    const periodRow = rows[2] || [];
+    const periodStr = periodRow.map(c => String(c)).join(' ');
+    const dateMatch = periodStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+    if (!dateMatch) return null;
+    return { logName, rows, date: `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` };
+  }
+
+  function parseMachineBlocks(rows, date, allStaff) {
+    // Blocks start at row index 3, each block is 3 rows: dateRow / nameRow / timestampRow
+    const results = [];
+    let i = 3;
+    while (i + 2 < rows.length) {
+      const nameRow = rows[i + 1] || [];
+      const tsCell  = String(rows[i + 2]?.[0] || '').trim();
+
+      // Name is at index 10 of the nameRow
+      const rawName = String(nameRow[10] || '').trim();
+      if (!rawName) { i += 3; continue; }
+
+      // Parse timestamps: "08:28\n12:11\n14:07\n16:23\n"
+      const times = tsCell
+        .split(/[\n\r]+/)
+        .map(t => t.trim())
+        .filter(t => /^\d{1,2}:\d{2}$/.test(t));
+
+      const check_in  = times.length > 0 ? times[0].padStart(5, '0') : null;
+      const check_out = times.length > 1 ? times[times.length - 1].padStart(5, '0') : null;
+      const status    = check_in ? 'present' : 'absent';
+
+      // Fuzzy match to staff
+      const n = rawName.toLowerCase();
+      const matched = allStaff.find(s => {
+        const sn = s.name.toLowerCase();
+        const parts = sn.split(' ');
+        return sn === n || sn.includes(n) || n.includes(sn) ||
+          parts.some(p => p === n || p.startsWith(n) || n.startsWith(p));
+      });
+
+      results.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, check_out, status });
+      i += 3;
+    }
+    return results;
+  }
+
+  // POST /api/attendance/parse-machine — detect & preview thumbprint machine XLS
+  router.post('/parse-machine', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const detected = detectMachineFormat(wb);
+      if (!detected) return res.json({ isMachineFormat: false });
+
+      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
+
+      res.json({ isMachineFormat: true, date: detected.date, records });
+    } catch (e) {
+      res.status(400).json({ error: 'Could not read file: ' + e.message });
+    }
+  });
+
+  // POST /api/attendance/import-machine — import thumbprint machine XLS
+  router.post('/import-machine', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const role = req.headers['x-user-role'] || 'unknown';
+    try {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const detected = detectMachineFormat(wb);
+      if (!detected) return res.status(400).json({ error: 'Not a recognised machine format' });
+
+      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
+
+      let imported = 0, skipped = 0;
+      const unmatched = [];
+
+      for (const rec of records) {
+        if (!rec.staffId) { unmatched.push(rec.rawName); skipped++; continue; }
+
+        const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(rec.staffId, rec.date);
+        if (existing) {
+          db.prepare(`UPDATE attendance SET check_in=?, check_out=?, status=?, notes=? WHERE id=?`)
+            .run(rec.check_in, rec.check_out, rec.status, 'Thumbprint machine', existing.id);
+        } else {
+          db.prepare(`INSERT INTO attendance (staff_id, date, check_in, check_out, status, notes) VALUES (?,?,?,?,?,?)`)
+            .run(rec.staffId, rec.date, rec.check_in, rec.check_out, rec.status, 'Thumbprint machine');
+        }
+        imported++;
+      }
+
+      db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance Machine Import', `${detected.date}: ${imported} imported, ${skipped} unmatched`);
+      if (role === 'hr') {
+        notify(`📂 <b>Attendance Imported (Machine) by HR</b>\n📅 ${detected.date}\n✅ ${imported} records\n⚠️ Unmatched: ${unmatched.join(', ') || 'none'}`);
+      }
+
+      res.json({ imported, skipped, unmatched, date: detected.date });
+    } catch (e) {
+      res.status(400).json({ error: 'Import failed: ' + e.message });
+    }
+  });
+
   return router;
 };

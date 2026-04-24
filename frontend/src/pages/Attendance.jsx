@@ -15,7 +15,8 @@ export default function Attendance() {
   // Upload state
   const [uploadFile, setUploadFile] = useState(null)
   const [parsing, setParsing] = useState(false)
-  const [parseResult, setParseResult] = useState(null)
+  const [parseResult, setParseResult] = useState(null)   // generic format
+  const [machineResult, setMachineResult] = useState(null) // machine format preview
   const [mapping, setMapping] = useState({ nameCol: '', dateCol: '', checkInCol: '', checkOutCol: '' })
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
@@ -60,12 +61,23 @@ export default function Attendance() {
     if (!file) return
     setUploadFile(file)
     setParseResult(null)
+    setMachineResult(null)
     setImportResult(null)
     setParsing(true)
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await axios.post('/api/attendance/parse-file', fd)
+      // First try machine format detection
+      const machineRes = await axios.post('/api/attendance/parse-machine', fd)
+      if (machineRes.data.isMachineFormat) {
+        setMachineResult(machineRes.data)
+        setParsing(false)
+        return
+      }
+      // Fall back to generic column-mapping parser
+      const fd2 = new FormData()
+      fd2.append('file', file)
+      const res = await axios.post('/api/attendance/parse-file', fd2)
       setParseResult(res.data)
       setMapping({
         nameCol: res.data.suggested.nameCol ?? '',
@@ -92,9 +104,28 @@ export default function Attendance() {
       fd.append('checkOutCol', mapping.checkOutCol !== '' ? mapping.checkOutCol : '')
       const res = await axios.post('/api/attendance/import', fd)
       setImportResult(res.data)
-      // Refresh attendance view
       const att = await axios.get(`/api/attendance?date=${date}`)
       setRecords(att.data)
+    } catch (e) {
+      setImportResult({ error: e.response?.data?.error || 'Import failed' })
+    }
+    setImporting(false)
+  }
+
+  async function handleMachineImport() {
+    if (!uploadFile) return
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', uploadFile)
+      const res = await axios.post('/api/attendance/import-machine', fd)
+      setImportResult(res.data)
+      // If the imported date is the currently viewed date, refresh the table
+      if (res.data.date === date) {
+        const att = await axios.get(`/api/attendance?date=${date}`)
+        setRecords(att.data)
+      }
     } catch (e) {
       setImportResult({ error: e.response?.data?.error || 'Import failed' })
     }
@@ -104,6 +135,7 @@ export default function Attendance() {
   function resetUpload() {
     setUploadFile(null)
     setParseResult(null)
+    setMachineResult(null)
     setImportResult(null)
     setMapping({ nameCol: '', dateCol: '', checkInCol: '', checkOutCol: '' })
     if (fileRef.current) fileRef.current.value = ''
@@ -220,7 +252,7 @@ export default function Attendance() {
               <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">1</span>
               <h2 className="font-semibold text-gray-700">Upload attendance file from thumbprint machine</h2>
             </div>
-            <p className="text-xs text-gray-400 mb-4">Supports Excel (.xlsx, .xls) and CSV (.csv) — works with ZKTeco, FingerTec, TimeTec, Virdi, and most brands</p>
+            <p className="text-xs text-gray-400 mb-4">Supports thumbprint machine XLS exports (auto-detected) and standard Excel / CSV files</p>
 
             {!uploadFile ? (
               <div
@@ -253,12 +285,98 @@ export default function Attendance() {
             {parseResult?.error && <p className="text-sm text-red-600 mt-3 text-center">⚠️ {parseResult.error}</p>}
           </div>
 
-          {/* Step 2: Column mapping */}
+          {/* Machine format: auto-detected preview */}
+          {machineResult && !importResult && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs flex items-center justify-center font-bold">✓</span>
+                <h2 className="font-semibold text-gray-700">Thumbprint machine format detected</h2>
+              </div>
+              <p className="text-xs text-gray-400 mb-4 ml-8">
+                Date: <strong>{machineResult.date}</strong> · {machineResult.records.length} staff found in file
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-gray-100 mb-4">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left px-4 py-2">Machine Name</th>
+                      <th className="text-left px-4 py-2">Matched Staff</th>
+                      <th className="text-left px-4 py-2">Check In</th>
+                      <th className="text-left px-4 py-2">Check Out</th>
+                      <th className="text-left px-4 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {machineResult.records.map((r, i) => (
+                      <tr key={i} className={r.staffName ? 'hover:bg-gray-50' : 'bg-red-50'}>
+                        <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.rawName}</td>
+                        <td className="px-4 py-2">
+                          {r.staffName
+                            ? <span className="text-green-700 font-medium">{r.staffName}</span>
+                            : <span className="text-red-500 text-xs">⚠ Not matched</span>}
+                        </td>
+                        <td className="px-4 py-2 text-gray-600">{r.check_in || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-2">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            r.status === 'present' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                          }`}>{r.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {machineResult.records.some(r => !r.staffName) && (
+                <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2 mb-3">
+                  ⚠ Some names couldn't be matched. Make sure staff names in the dashboard include the machine name (e.g. "Yap Ah Kow" matches "yap"). Unmatched staff will be skipped.
+                </p>
+              )}
+              <button
+                onClick={handleMachineImport}
+                disabled={importing}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors"
+              >
+                {importing ? 'Importing...' : `Import ${machineResult.records.filter(r => r.staffName).length} records for ${machineResult.date}`}
+              </button>
+            </div>
+          )}
+
+          {/* Machine import result */}
+          {machineResult && importResult && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              {importResult.error ? (
+                <p className="text-red-600 text-sm">⚠️ {importResult.error}</p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex gap-4">
+                    <div className="bg-green-50 border border-green-100 rounded-lg px-4 py-3 text-center">
+                      <div className="text-2xl font-bold text-green-600">{importResult.imported}</div>
+                      <div className="text-xs text-green-500 mt-0.5">Imported</div>
+                    </div>
+                    <div className="bg-yellow-50 border border-yellow-100 rounded-lg px-4 py-3 text-center">
+                      <div className="text-2xl font-bold text-yellow-600">{importResult.skipped}</div>
+                      <div className="text-xs text-yellow-500 mt-0.5">Not matched</div>
+                    </div>
+                  </div>
+                  {importResult.unmatched?.length > 0 && (
+                    <p className="text-xs text-gray-500 bg-yellow-50 rounded-lg p-3">
+                      <strong>Unmatched:</strong> {importResult.unmatched.join(', ')}
+                    </p>
+                  )}
+                  <p className="text-xs text-green-600">✅ Attendance for {importResult.date} saved successfully.</p>
+                  <button onClick={resetUpload} className="text-sm text-blue-600 hover:underline">Upload another file</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Column mapping (generic files only) */}
           {parseResult && !parseResult.error && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center gap-2 mb-4">
                 <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold">2</span>
-                <h2 className="font-semibold text-gray-700">Map columns — tell us which column is which</h2>
+                <h2 className="font-semibold text-gray-700">Standard file — map columns</h2>
               </div>
               <p className="text-xs text-gray-400 mb-4">
                 Found <strong>{parseResult.totalRows}</strong> data rows and <strong>{parseResult.headers.length}</strong> columns.
