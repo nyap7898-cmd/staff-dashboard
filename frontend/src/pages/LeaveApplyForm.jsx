@@ -13,8 +13,9 @@ function daysBetween(start, end) {
 export default function LeaveApplyForm() {
   const [staff, setStaff] = useState([])
   const [form, setForm] = useState({
-    staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '', session: 'full',
+    staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '',
   })
+  const [customDays, setCustomDays] = useState('')
   const [file, setFile] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -25,30 +26,22 @@ export default function LeaveApplyForm() {
   }, [])
 
   function update(field, value) {
-    setForm(prev => {
-      const next = { ...prev, [field]: value }
-      // When half day selected, force end date = start date
-      if (field === 'session' && value === 'half') {
-        next.end_date = next.start_date
-      }
-      if (field === 'start_date' && next.session === 'half') {
-        next.end_date = value
-      }
-      return next
-    })
+    setForm(prev => ({ ...prev, [field]: value }))
+    // Reset custom days when dates change so auto-calc kicks in
+    if (field === 'start_date' || field === 'end_date') setCustomDays('')
     setSuccess(false)
     setError('')
   }
 
-  const fullDays = daysBetween(form.start_date, form.end_date)
-  const days = form.session === 'half' ? 0.5 : fullDays
+  const autoDays = daysBetween(form.start_date, form.end_date)
+  // If HR typed a custom value use it, otherwise use auto-calculated
+  const days = customDays !== '' ? parseFloat(customDays) : autoDays
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.staff_id) return setError('Please select a staff member.')
-    if (!form.start_date) return setError('Please select a start date.')
-    if (form.session === 'full' && !form.end_date) return setError('Please select an end date.')
-    if (days <= 0) return setError('End date must be on or after start date.')
+    if (!form.start_date || !form.end_date) return setError('Please select start and end dates.')
+    if (!days || days <= 0) return setError('Number of days must be greater than 0.')
 
     setSubmitting(true)
     setError('')
@@ -57,14 +50,15 @@ export default function LeaveApplyForm() {
       fd.append('staff_id', form.staff_id)
       fd.append('leave_type', form.leave_type)
       fd.append('start_date', form.start_date)
-      fd.append('end_date', form.session === 'half' ? form.start_date : form.end_date)
+      fd.append('end_date', form.end_date)
       fd.append('days', days)
       fd.append('reason', form.reason)
       if (file) fd.append('document', file)
 
       await axios.post('/api/leaves', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       setSuccess(true)
-      setForm({ staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '', session: 'full' })
+      setForm({ staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '' })
+      setCustomDays('')
       setFile(null)
       document.getElementById('doc-upload').value = ''
     } catch {
@@ -108,44 +102,57 @@ export default function LeaveApplyForm() {
             </select>
           </div>
 
-          {/* Session — always visible */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Session *</label>
-            <div className="flex gap-3">
-              <button type="button" onClick={() => update('session', 'full')}
-                className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${form.session === 'full' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                Full Day
-              </button>
-              <button type="button" onClick={() => update('session', 'half')}
-                className={`flex-1 py-2.5 rounded-lg border text-sm font-medium transition-colors ${form.session === 'half' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
-                ½ Half Day
-              </button>
-            </div>
-          </div>
-
           {/* Dates */}
-          <div className={`grid gap-4 ${form.session === 'full' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {form.session === 'half' ? 'Date *' : 'Start Date *'}
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
               <input type="date" value={form.start_date} onChange={e => update('start_date', e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
-            {form.session === 'full' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
-                <input type="date" value={form.end_date} min={form.start_date}
-                  onChange={e => update('end_date', e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+              <input type="date" value={form.end_date} min={form.start_date} onChange={e => update('end_date', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
 
-          {/* Days summary */}
-          {(days > 0) && (
-            <div className={`border rounded-lg px-4 py-2.5 text-sm font-medium ${form.session === 'half' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-blue-50 border-blue-100 text-blue-700'}`}>
-              Total: <strong>{days}</strong> {form.session === 'half' ? 'half day (0.5)' : `day${days !== 1 ? 's' : ''}`}
+          {/* Days — editable, auto-calculated from dates */}
+          {autoDays > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Number of Days *
+                <span className="text-xs text-gray-400 font-normal ml-2">— auto-calculated, edit if needed (e.g. 0.5, 2.5)</span>
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="0.5"
+                  max={autoDays}
+                  step="0.5"
+                  value={customDays !== '' ? customDays : autoDays}
+                  onChange={e => setCustomDays(e.target.value)}
+                  className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
+                />
+                <span className="text-sm text-gray-500">
+                  {days === 0.5 ? 'half day' : days === 1 ? 'day' : 'days'}
+                  {customDays !== '' && customDays != autoDays && (
+                    <button type="button" onClick={() => setCustomDays('')}
+                      className="ml-3 text-xs text-blue-500 hover:underline">
+                      reset to {autoDays}
+                    </button>
+                  )}
+                </span>
+              </div>
+              <div className="flex gap-2 mt-2">
+                {[0.5, 1, 1.5, 2, 2.5, 3].filter(d => d <= autoDays).map(d => (
+                  <button key={d} type="button" onClick={() => setCustomDays(String(d))}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      days === d ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                    }`}>
+                    {d}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
