@@ -124,9 +124,11 @@ export default function Attendance() {
       fd.append('overrides', JSON.stringify(nameOverrides))
       const res = await axios.post('/api/attendance/import-machine', fd)
       setImportResult(res.data)
-      // If the imported date is the currently viewed date, refresh the table
-      if (res.data.date === date) {
-        const att = await axios.get(`/api/attendance?date=${date}`)
+      if (res.data.date) {
+        // Switch to Manual tab and jump to the imported date so user sees the data
+        const importedDate = res.data.date
+        setDate(importedDate)
+        const att = await axios.get(`/api/attendance?date=${importedDate}`)
         setRecords(att.data)
       }
     } catch (e) {
@@ -359,7 +361,7 @@ export default function Attendance() {
                 disabled={importing}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors"
               >
-                {importing ? 'Importing...' : `Import ${machineResult.records.filter(r => r.staffName).length} records for ${machineResult.date}`}
+                {importing ? 'Importing...' : `Import ${machineResult.records.filter(r => r.staffName || nameOverrides[r.rawName]).length} records for ${machineResult.date}`}
               </button>
             </div>
           )}
@@ -386,8 +388,16 @@ export default function Attendance() {
                       <strong>Unmatched:</strong> {importResult.unmatched.join(', ')}
                     </p>
                   )}
-                  <p className="text-xs text-green-600">✅ Attendance for {importResult.date} saved successfully.</p>
-                  <button onClick={resetUpload} className="text-sm text-blue-600 hover:underline">Upload another file</button>
+                  <p className="text-xs text-green-600">✅ Attendance for <strong>{importResult.date}</strong> saved successfully.</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setTab('manual'); resetUpload() }}
+                      className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                    >
+                      👁 View attendance for {importResult.date}
+                    </button>
+                    <button onClick={resetUpload} className="text-sm text-blue-600 hover:underline self-center">Upload another file</button>
+                  </div>
                 </div>
               )}
             </div>
