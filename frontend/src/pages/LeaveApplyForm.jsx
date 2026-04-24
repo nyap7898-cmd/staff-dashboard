@@ -116,45 +116,49 @@ export default function LeaveApplyForm() {
             </div>
           </div>
 
-          {/* Days — editable, auto-calculated from dates */}
-          {autoDays > 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Number of Days *
-                <span className="text-xs text-gray-400 font-normal ml-2">— auto-calculated, edit if needed (e.g. 0.5, 2.5)</span>
-              </label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min="0.5"
-                  max={autoDays}
-                  step="0.5"
-                  value={customDays !== '' ? customDays : autoDays}
-                  onChange={e => setCustomDays(e.target.value)}
-                  className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
-                />
-                <span className="text-sm text-gray-500">
-                  {days === 0.5 ? 'half day' : days === 1 ? 'day' : 'days'}
-                  {customDays !== '' && customDays != autoDays && (
-                    <button type="button" onClick={() => setCustomDays('')}
-                      className="ml-3 text-xs text-blue-500 hover:underline">
-                      reset to {autoDays}
-                    </button>
-                  )}
-                </span>
-              </div>
-              <div className="flex gap-2 mt-2">
-                {[0.5, 1, 1.5, 2, 2.5, 3].filter(d => d <= autoDays).map(d => (
-                  <button key={d} type="button" onClick={() => setCustomDays(String(d))}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                      days === d ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                    }`}>
-                    {d}
+          {/* Days — always visible, auto-calculated once dates are picked */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Number of Days *
+              {autoDays > 0
+                ? <span className="text-xs text-gray-400 font-normal ml-2">— auto-calculated from dates, adjust if needed</span>
+                : <span className="text-xs text-gray-400 font-normal ml-2">— select dates above to auto-calculate, or pick below</span>}
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={customDays !== '' ? customDays : (autoDays > 0 ? autoDays : '')}
+                placeholder="0"
+                onChange={e => setCustomDays(e.target.value)}
+                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
+              />
+              <span className="text-sm text-gray-500">
+                {days === 0.5 ? 'half day' : days === 1 ? 'day' : days > 0 ? 'days' : ''}
+                {autoDays > 0 && customDays !== '' && parseFloat(customDays) !== autoDays && (
+                  <button type="button" onClick={() => setCustomDays('')}
+                    className="ml-3 text-xs text-blue-500 hover:underline">
+                    reset to {autoDays}
                   </button>
-                ))}
-              </div>
+                )}
+              </span>
             </div>
-          )}
+            {/* Quick-select — always show 0.5 and 1; show more based on autoDays */}
+            <div className="flex gap-2 mt-2 flex-wrap">
+              {[0.5, 1, 1.5, 2, 2.5, 3, 4, 5].filter(d => autoDays > 0 ? d <= autoDays : d <= 1).map(d => (
+                <button key={d} type="button" onClick={() => setCustomDays(String(d))}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    days === d ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}>
+                  {d === 0.5 ? '½ day' : d === 1 ? '1 day' : `${d} days`}
+                </button>
+              ))}
+              {autoDays > 3 && (
+                <span className="text-xs text-gray-400 self-center">or type any amount above</span>
+              )}
+            </div>
+          </div>
 
           {/* Reason */}
           <div>
