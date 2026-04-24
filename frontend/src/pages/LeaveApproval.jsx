@@ -12,6 +12,7 @@ export default function LeaveApproval() {
   const [recent, setRecent] = useState([])
   const [acting, setActing] = useState({})
   const [expanded, setExpanded] = useState(null)
+  const [expandedRecent, setExpandedRecent] = useState(null)
 
   function load() {
     axios.get('/api/leaves?status=pending').then(r => setPending(r.data))
@@ -159,14 +160,47 @@ export default function LeaveApproval() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {recent.map(l => (
-                  <tr key={l.id} className="hover:bg-gray-50">
-                    <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
-                    <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{fmt(l.start_date)} – {fmt(l.end_date)}</td>
-                    <td className="px-4 py-3 text-center">{l.days}</td>
-                    <td className="px-4 py-3"><Badge status={l.status} /></td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{fmt(l.decided_at)}</td>
-                  </tr>
+                  <Fragment key={l.id}>
+                    <tr
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => setExpandedRecent(expandedRecent === l.id ? null : l.id)}
+                    >
+                      <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
+                      <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{fmt(l.start_date)} – {fmt(l.end_date)}</td>
+                      <td className="px-4 py-3 text-center">{l.days}</td>
+                      <td className="px-4 py-3"><Badge status={l.status} /></td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{fmt(l.decided_at)}</td>
+                    </tr>
+                    {expandedRecent === l.id && (
+                      <tr className="bg-gray-50">
+                        <td colSpan={6} className="px-6 py-4">
+                          <div className="text-sm space-y-1 text-gray-700">
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Staff:</span>{l.name} ({l.department})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Leave type:</span>{l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1)} Leave</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Decision:</span><Badge status={l.status} /></div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Decided:</span>{fmt(l.decided_at)}</div>
+                            {l.document_path && (
+                              <div>
+                                <span className="font-medium text-gray-500 w-28 inline-block">Document:</span>
+                                <a
+                                  href={`/uploads/${l.document_path}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline text-sm"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  📎 View supporting document
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
