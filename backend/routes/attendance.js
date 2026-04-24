@@ -126,8 +126,10 @@ module.exports = function (db, notify) {
       // Fuzzy name match
       function matchStaff(nameStr) {
         const n = nameStr.toLowerCase().trim();
+        if (!n) return null;
         return allStaff.find(s => {
-          const sn = s.name.toLowerCase();
+          const sn = s.name.toLowerCase().trim();
+          if (!sn) return false; // skip staff records with empty names
           return sn === n || sn.includes(n) || n.includes(sn) ||
             s.name.split(' ').some(part => part.toLowerCase() === n.split(' ')[0]);
         });
@@ -222,8 +224,10 @@ module.exports = function (db, notify) {
   // Fuzzy match a raw name string to a staff record
   function matchStaffByName(rawName, allStaff) {
     const n = rawName.toLowerCase().trim();
+    if (!n) return null;
     return allStaff.find(s => {
-      const sn = s.name.toLowerCase();
+      const sn = s.name.toLowerCase().trim();
+      if (!sn) return false; // skip staff records with empty names
       const parts = sn.split(' ');
       return sn === n || sn.includes(n) || n.includes(sn) ||
         parts.some(p => p.length >= 2 && (p === n || p.startsWith(n) || n.startsWith(p)));
