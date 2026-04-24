@@ -16,9 +16,15 @@ async function main() {
   app.use(express.json());
   app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-  // Serve built React frontend
+  // Serve built React frontend — never cache index.html, cache assets forever
   const frontendDist = path.join(__dirname, '../frontend/dist');
-  app.use(express.static(frontendDist));
+  app.use(express.static(frontendDist, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    }
+  }));
 
   app.use('/api/staff', require('./routes/staff')(db, notify));
   app.use('/api/attendance', require('./routes/attendance')(db, notify));
