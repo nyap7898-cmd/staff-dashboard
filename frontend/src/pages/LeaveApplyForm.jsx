@@ -26,11 +26,33 @@ export default function LeaveApplyForm() {
   }, [])
 
   function update(field, value) {
-    setForm(prev => ({ ...prev, [field]: value }))
-    // Reset custom days when dates change so auto-calc kicks in
-    if (field === 'start_date' || field === 'end_date') setCustomDays('')
+    setForm(prev => {
+      const next = { ...prev, [field]: value }
+      // If half-day is active and start_date changes, lock end_date to same day
+      if (field === 'start_date' && customDays === '0.5') {
+        next.end_date = value
+      }
+      return next
+    })
+    // Reset custom days when dates change (unless it's a half-day — keep that)
+    if (field === 'start_date' || field === 'end_date') {
+      if (customDays !== '0.5') setCustomDays('')
+    }
     setSuccess(false)
     setError('')
+  }
+
+  function toggleHalfDay() {
+    if (customDays === '0.5') {
+      // Untick — just clear
+      setCustomDays('')
+    } else {
+      // Tick — set half day and lock end_date = start_date
+      setCustomDays('0.5')
+      if (form.start_date) {
+        setForm(prev => ({ ...prev, end_date: prev.start_date }))
+      }
+    }
   }
 
   const autoDays = daysBetween(form.start_date, form.end_date)
@@ -110,9 +132,23 @@ export default function LeaveApplyForm() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
-              <input type="date" value={form.end_date} min={form.start_date} onChange={e => update('end_date', e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                End Date *
+                {customDays === '0.5' && <span className="ml-2 text-xs text-yellow-600 font-normal">— locked (½ day)</span>}
+              </label>
+              <input
+                type="date"
+                value={form.end_date}
+                min={form.start_date}
+                max={customDays === '0.5' ? form.start_date : undefined}
+                onChange={e => update('end_date', e.target.value)}
+                disabled={customDays === '0.5'}
+                className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  customDays === '0.5'
+                    ? 'border-yellow-300 bg-yellow-50 text-gray-500 cursor-not-allowed'
+                    : 'border-gray-300'
+                }`}
+              />
             </div>
           </div>
 
@@ -123,7 +159,7 @@ export default function LeaveApplyForm() {
             {/* Half-day yellow checkbox — always visible */}
             <button
               type="button"
-              onClick={() => setCustomDays(customDays === '0.5' ? '' : '0.5')}
+              onClick={toggleHalfDay}
               className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl border-2 font-medium text-sm transition-colors mb-3 ${
                 days === 0.5
                   ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
