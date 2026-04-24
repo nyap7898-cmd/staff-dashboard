@@ -77,7 +77,7 @@ export default function LeaveApproval() {
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setExpanded(expanded === l.id ? null : l.id)}
                     >
-                      <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
+                      <td className="px-5 py-3 font-medium text-gray-800">{l.name || <span className="text-gray-400 italic text-xs">(no name — fix in Staff Profiles)</span>}</td>
                       <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
                       <td className="px-4 py-3 text-gray-600">{fmt(l.start_date)}</td>
                       <td className="px-4 py-3 text-gray-600">{fmt(l.end_date)}</td>
@@ -165,7 +165,7 @@ export default function LeaveApproval() {
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setExpandedRecent(expandedRecent === l.id ? null : l.id)}
                     >
-                      <td className="px-5 py-3 font-medium text-gray-800">{l.name}</td>
+                      <td className="px-5 py-3 font-medium text-gray-800">{l.name || <span className="text-gray-400 italic text-xs">(no name — fix in Staff Profiles)</span>}</td>
                       <td className="px-4 py-3"><Badge status={l.leave_type} /></td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{fmt(l.start_date)} – {fmt(l.end_date)}</td>
                       <td className="px-4 py-3 text-center">{l.days}</td>

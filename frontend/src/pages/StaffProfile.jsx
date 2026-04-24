@@ -62,6 +62,10 @@ export default function StaffProfile() {
   }
 
   async function saveEdit() {
+    if (!editForm.name || !editForm.name.trim()) {
+      alert('Staff name cannot be empty.')
+      return
+    }
     setSaving(true)
     await axios.put(`/api/staff/${selected.id}`, editForm)
     const updated = { ...selected, ...editForm }
