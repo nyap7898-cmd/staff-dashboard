@@ -220,33 +220,63 @@ module.exports = function (db, notify) {
   // ─── Thumbprint machine format helpers ───────────────────────────────────────
 
   function detectMachineFormat(wb) {
-    // Look for a sheet named "Logs" or "Log" or "Detail"
-    const logName = wb.SheetNames.find(n => /log|detail/i.test(n));
-    if (!logName) return null;
-    const sheet = wb.Sheets[logName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    // Row index 2 should contain the period string like "2026/02/27 ~ 02/27"
-    if (rows.length < 4) return null;
-    const periodRow = rows[2] || [];
-    const periodStr = periodRow.map(c => String(c)).join(' ');
-    const dateMatch = periodStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
-    if (!dateMatch) return null;
-    return { logName, rows, date: `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` };
+    // Try sheets named Log/Detail first, then try ALL sheets
+    const preferred = wb.SheetNames.find(n => /log|detail/i.test(n));
+    const sheetsToTry = preferred
+      ? [preferred, ...wb.SheetNames.filter(n => n !== preferred)]
+      : wb.SheetNames;
+
+    for (const sheetName of sheetsToTry) {
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (rows.length < 4) continue;
+
+      // Scan first 10 rows for a date pattern like 2026/02/27
+      let date = null;
+      for (let r = 0; r < Math.min(10, rows.length); r++) {
+        const rowStr = (rows[r] || []).map(c => String(c)).join(' ');
+        const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+        if (m) { date = `${m[1]}-${m[2]}-${m[3]}`; break; }
+      }
+      if (!date) continue;
+
+      // Confirm it has the block structure: look for a row containing "Name :" pattern
+      const hasNameRow = rows.some(row =>
+        (row || []).some(c => String(c).includes('Name'))
+      );
+      if (!hasNameRow) continue;
+
+      return { logName: sheetName, rows, date };
+    }
+    return null;
   }
 
   function parseMachineBlocks(rows, date, allStaff) {
-    // Blocks start at row index 3, each block is 3 rows: dateRow / nameRow / timestampRow
     const results = [];
-    let i = 3;
-    while (i + 2 < rows.length) {
-      const nameRow = rows[i + 1] || [];
-      const tsCell  = String(rows[i + 2]?.[0] || '').trim();
 
-      // Name is at index 10 of the nameRow
-      const rawName = String(nameRow[10] || '').trim();
-      if (!rawName) { i += 3; continue; }
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const rowStr = row.map(c => String(c)).join(' ');
 
-      // Parse timestamps: "08:28\n12:11\n14:07\n16:23\n"
+      // Find rows that contain "Name :" — this marks a staff block
+      if (!rowStr.includes('Name')) continue;
+
+      // Extract name: look for non-empty cell after "Name :" pattern
+      // Standard format: [..., "Name :", "", "yap", ...]
+      // Find index of the cell containing "Name"
+      let rawName = '';
+      for (let col = 0; col < row.length; col++) {
+        if (String(row[col]).includes('Name')) {
+          // Name value is usually 2 cells after "Name :"
+          rawName = String(row[col + 2] || row[col + 1] || '').trim();
+          if (rawName && rawName !== ':') break;
+        }
+      }
+      if (!rawName || rawName === ':') continue;
+
+      // Timestamp row is the next row
+      const tsRow = rows[i + 1] || [];
+      const tsCell = String(tsRow[0] || '').trim();
       const times = tsCell
         .split(/[\n\r]+/)
         .map(t => t.trim())
@@ -266,7 +296,6 @@ module.exports = function (db, notify) {
       });
 
       results.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, check_out, status });
-      i += 3;
     }
     return results;
   }
@@ -277,12 +306,15 @@ module.exports = function (db, notify) {
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
       const detected = detectMachineFormat(wb);
-      if (!detected) return res.json({ isMachineFormat: false });
+      if (!detected) {
+        // Return sheet names so frontend can show debug info
+        return res.json({ isMachineFormat: false, sheets: wb.SheetNames });
+      }
 
       const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
       const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
 
-      res.json({ isMachineFormat: true, date: detected.date, records, allStaff });
+      res.json({ isMachineFormat: true, date: detected.date, sheet: detected.logName, records, allStaff });
     } catch (e) {
       res.status(400).json({ error: 'Could not read file: ' + e.message });
     }

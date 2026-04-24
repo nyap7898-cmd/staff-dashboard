@@ -76,16 +76,11 @@ export default function Attendance() {
         setParsing(false)
         return
       }
-      // Fall back to generic column-mapping parser
-      const fd2 = new FormData()
-      fd2.append('file', file)
-      const res = await axios.post('/api/attendance/parse-file', fd2)
-      setParseResult(res.data)
-      setMapping({
-        nameCol: res.data.suggested.nameCol ?? '',
-        dateCol: res.data.suggested.dateCol ?? '',
-        checkInCol: res.data.suggested.checkInCol ?? '',
-        checkOutCol: res.data.suggested.checkOutCol ?? '',
+      // Machine not detected — show helpful debug info then stop
+      // (don't try generic parser for machine files — it produces garbage)
+      const sheets = machineRes.data.sheets || []
+      setParseResult({
+        error: `Could not detect thumbprint machine format. Sheets found: [${sheets.join(', ') || 'none'}]. Make sure you are uploading the correct XLS file from the machine.`
       })
     } catch (e) {
       setParseResult({ error: e.response?.data?.error || 'Failed to read file' })
