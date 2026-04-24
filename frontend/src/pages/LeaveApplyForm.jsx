@@ -16,6 +16,7 @@ export default function LeaveApplyForm() {
     staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '',
   })
   const [customDays, setCustomDays] = useState('')
+  const [halfDayPeriod, setHalfDayPeriod] = useState('morning') // 'morning' | 'afternoon'
   const [file, setFile] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -34,7 +35,7 @@ export default function LeaveApplyForm() {
       }
       return next
     })
-    // Reset custom days when dates change (unless it's a half-day — keep that)
+    // Reset custom days when dates change (unless half-day — keep that)
     if (field === 'start_date' || field === 'end_date') {
       if (customDays !== '0.5') setCustomDays('')
     }
@@ -44,10 +45,8 @@ export default function LeaveApplyForm() {
 
   function toggleHalfDay() {
     if (customDays === '0.5') {
-      // Untick — just clear
       setCustomDays('')
     } else {
-      // Tick — set half day and lock end_date = start_date
       setCustomDays('0.5')
       if (form.start_date) {
         setForm(prev => ({ ...prev, end_date: prev.start_date }))
@@ -55,8 +54,8 @@ export default function LeaveApplyForm() {
     }
   }
 
+  const isHalfDay = customDays === '0.5'
   const autoDays = daysBetween(form.start_date, form.end_date)
-  // If HR typed a custom value use it, otherwise use auto-calculated
   const days = customDays !== '' ? parseFloat(customDays) : autoDays
 
   async function handleSubmit(e) {
@@ -75,12 +74,14 @@ export default function LeaveApplyForm() {
       fd.append('end_date', form.end_date)
       fd.append('days', days)
       fd.append('reason', form.reason)
+      if (isHalfDay) fd.append('half_day_period', halfDayPeriod)
       if (file) fd.append('document', file)
 
       await axios.post('/api/leaves', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
       setSuccess(true)
       setForm({ staff_id: '', leave_type: 'annual', start_date: '', end_date: '', reason: '' })
       setCustomDays('')
+      setHalfDayPeriod('morning')
       setFile(null)
       document.getElementById('doc-upload').value = ''
     } catch {
@@ -134,17 +135,17 @@ export default function LeaveApplyForm() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 End Date *
-                {customDays === '0.5' && <span className="ml-2 text-xs text-yellow-600 font-normal">— locked (½ day)</span>}
+                {isHalfDay && <span className="ml-2 text-xs text-yellow-600 font-normal">— locked (½ day)</span>}
               </label>
               <input
                 type="date"
                 value={form.end_date}
                 min={form.start_date}
-                max={customDays === '0.5' ? form.start_date : undefined}
+                max={isHalfDay ? form.start_date : undefined}
                 onChange={e => update('end_date', e.target.value)}
-                disabled={customDays === '0.5'}
+                disabled={isHalfDay}
                 className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  customDays === '0.5'
+                  isHalfDay
                     ? 'border-yellow-300 bg-yellow-50 text-gray-500 cursor-not-allowed'
                     : 'border-gray-300'
                 }`}
@@ -156,26 +157,54 @@ export default function LeaveApplyForm() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Number of Days *</label>
 
-            {/* Half-day yellow checkbox — always visible */}
+            {/* Half-day yellow checkbox */}
             <button
               type="button"
               onClick={toggleHalfDay}
               className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl border-2 font-medium text-sm transition-colors mb-3 ${
-                days === 0.5
+                isHalfDay
                   ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
                   : 'bg-white border-gray-200 text-gray-600 hover:border-yellow-300 hover:bg-yellow-50'
               }`}
             >
               <span className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                days === 0.5 ? 'bg-yellow-400 border-yellow-400' : 'border-gray-300 bg-white'
+                isHalfDay ? 'bg-yellow-400 border-yellow-400' : 'border-gray-300 bg-white'
               }`}>
-                {days === 0.5 && <span className="text-white text-xs font-bold">✓</span>}
+                {isHalfDay && <span className="text-white text-xs font-bold">✓</span>}
               </span>
-              <span>½ Day <span className="font-normal text-xs ml-1 opacity-70">(0.5 days — morning or afternoon only)</span></span>
+              <span>½ Day <span className="font-normal text-xs ml-1 opacity-70">(0.5 days)</span></span>
             </button>
 
-            {/* Full days — shown when not half-day */}
-            {days !== 0.5 && (
+            {/* Morning / Afternoon selector — shown when half-day is ticked */}
+            {isHalfDay && (
+              <div className="flex gap-3 mb-3 ml-1">
+                <button
+                  type="button"
+                  onClick={() => setHalfDayPeriod('morning')}
+                  className={`flex-1 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
+                    halfDayPeriod === 'morning'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
+                  }`}
+                >
+                  🌅 Morning
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHalfDayPeriod('afternoon')}
+                  className={`flex-1 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors ${
+                    halfDayPeriod === 'afternoon'
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
+                  }`}
+                >
+                  🌇 Afternoon
+                </button>
+              </div>
+            )}
+
+            {/* Full days input — shown when not half-day */}
+            {!isHalfDay && (
               <div className="flex items-center gap-3">
                 <input
                   type="number"
@@ -188,14 +217,9 @@ export default function LeaveApplyForm() {
                 />
                 <span className="text-sm text-gray-500">
                   {days === 1 ? 'day' : 'days'}
-                  {autoDays > 0 && (
-                    <span className="ml-2 text-xs text-gray-400">
-                      (auto: {autoDays})
-                      {customDays !== '' && parseFloat(customDays) !== autoDays && (
-                        <button type="button" onClick={() => setCustomDays('')}
-                          className="ml-2 text-blue-500 hover:underline">reset</button>
-                      )}
-                    </span>
+                  {autoDays > 0 && customDays !== '' && parseFloat(customDays) !== autoDays && (
+                    <button type="button" onClick={() => setCustomDays('')}
+                      className="ml-3 text-xs text-blue-500 hover:underline">reset to {autoDays}</button>
                   )}
                 </span>
               </div>

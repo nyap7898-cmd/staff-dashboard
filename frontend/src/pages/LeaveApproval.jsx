@@ -109,7 +109,7 @@ export default function LeaveApproval() {
                           <div className="text-sm space-y-1 text-gray-700">
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Staff:</span>{l.name} ({l.department})</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Leave type:</span>{l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1)} Leave</div>
-                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''}{l.half_day_period ? ` — ${l.half_day_period}` : ''})</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Applied:</span>{fmt(l.applied_at)}</div>
                             {l.document_name && (
@@ -178,7 +178,7 @@ export default function LeaveApproval() {
                           <div className="text-sm space-y-1 text-gray-700">
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Staff:</span>{l.name} ({l.department})</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Leave type:</span>{l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1)} Leave</div>
-                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''})</div>
+                            <div><span className="font-medium text-gray-500 w-28 inline-block">Period:</span>{fmt(l.start_date)} → {fmt(l.end_date)} ({l.days} day{l.days !== 1 ? 's' : ''}{l.half_day_period ? ` — ${l.half_day_period}` : ''})</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Reason:</span>{l.reason || <em className="text-gray-400">No reason given</em>}</div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Decision:</span><Badge status={l.status} /></div>
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Decided:</span>{fmt(l.decided_at)}</div>

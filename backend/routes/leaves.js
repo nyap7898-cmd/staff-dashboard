@@ -55,7 +55,7 @@ module.exports = function (db, notify) {
     const { status } = req.query;
     // Exclude document_data (large base64) — use /api/leaves/:id/document to fetch the file
     const cols = `lr.id, lr.staff_id, lr.leave_type, lr.start_date, lr.end_date, lr.days,
-      lr.reason, lr.document_name, lr.status, lr.applied_at, lr.decided_at, lr.director_notes,
+      lr.reason, lr.document_name, lr.half_day_period, lr.status, lr.applied_at, lr.decided_at, lr.director_notes,
       s.name, s.department`;
     let records;
     if (status) {
@@ -90,11 +90,12 @@ module.exports = function (db, notify) {
     const document_data = req.file ? req.file.buffer.toString('base64') : null;
     const document_mime = req.file ? req.file.mimetype : null;
     const document_name = req.file ? req.file.originalname : null;
+    const half_day_period = req.body.half_day_period || null; // 'morning' | 'afternoon' | null
     const now = new Date().toISOString();
     const result = db.prepare(`
-      INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, document_data, document_mime, document_name, status, applied_at)
-      VALUES (?,?,?,?,?,?,?,?,?,'pending',?)
-    `).run(staff_id, leave_type, start_date, end_date, days, reason || null, document_data, document_mime, document_name, now);
+      INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, document_data, document_mime, document_name, half_day_period, status, applied_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)
+    `).run(staff_id, leave_type, start_date, end_date, days, reason || null, document_data, document_mime, document_name, half_day_period, now);
 
     const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(staff_id);
     const staffName = staffRow ? staffRow.name : `Staff #${staff_id}`;
