@@ -21,8 +21,10 @@ module.exports = function (db, notify) {
       name: s.name,
       department: s.department,
       date,
-      check_in: attMap[s.id]?.check_in || null,
-      check_out: attMap[s.id]?.check_out || null,
+      check_in:   attMap[s.id]?.check_in   || null,
+      lunch_out:  attMap[s.id]?.lunch_out   || null,
+      lunch_in:   attMap[s.id]?.lunch_in    || null,
+      check_out:  attMap[s.id]?.check_out   || null,
       status: attMap[s.id]?.status || null,
       notes: attMap[s.id]?.notes || null,
     }));
@@ -31,16 +33,16 @@ module.exports = function (db, notify) {
   });
 
   router.post('/', (req, res) => {
-    const { staff_id, date, check_in, check_out, status, notes } = req.body;
+    const { staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes } = req.body;
     const role = req.headers['x-user-role'] || 'unknown';
 
     const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(staff_id, date);
     if (existing) {
-      db.prepare(`UPDATE attendance SET check_in=?, check_out=?, status=?, notes=? WHERE id=?`)
-        .run(check_in || null, check_out || null, status, notes || null, existing.id);
+      db.prepare(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`)
+        .run(check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null, existing.id);
     } else {
-      db.prepare(`INSERT INTO attendance (staff_id, date, check_in, check_out, status, notes) VALUES (?,?,?,?,?,?)`)
-        .run(staff_id, date, check_in || null, check_out || null, status, notes || null);
+      db.prepare(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(staff_id, date, check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null);
     }
 
     const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(staff_id);
@@ -234,47 +236,76 @@ module.exports = function (db, notify) {
     });
   }
 
-  // Extract check-in/check-out times from the Logs sheet (block format)
-  // Returns { "yap": { check_in: "08:28", check_out: "16:23" }, ... }
-  function extractTimesFromLogSheet(wb) {
-    const logName = wb.SheetNames.find(n => /log|detail/i.test(n));
-    if (!logName) return {};
-    const sheet = wb.Sheets[logName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  // Parse a time cell value (HH:MM string or Excel decimal fraction)
+  function parseTimeFromCell(val) {
+    if (!val && val !== 0) return null;
+    const s = String(val).trim();
+    if (!s) return null;
+    // HH:MM or HH:MM:SS
+    const m = s.match(/(\d{1,2}):(\d{2})/);
+    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+    // Excel time as decimal fraction (e.g. 0.354166... = 08:30)
+    const n = parseFloat(s);
+    if (!isNaN(n) && n > 0 && n < 1) {
+      const totalMin = Math.round(n * 24 * 60);
+      return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+    }
+    return null;
+  }
+
+  // Extract all 4 times (AM In, AM Out, PM In, PM Out) from per-person sheets
+  // Each person has their own sheet named after them (e.g. "yap", "juimah")
+  // Sheet structure:
+  //   header row: [..., "AM", ..., "PM", ..., "Over", ...]   (merged cells)
+  //   sub-header:  [..., "In", "Out", "In", "Out", "In", "Out"]
+  //   data rows:   ["27 Fr", "08:28", "12:11", "14:07", "16:23", ...]
+  // Returns { "yap": { check_in, lunch_out, lunch_in, check_out }, ... }
+  function extractTimesFromPersonSheets(wb) {
     const timesMap = {};
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i] || [];
-      // Look for a row that has a cell containing "Name" (marks a staff block header)
-      const nameIdx = row.findIndex(c => /^Name\s*[:：]?$/.test(String(c).trim()));
-      if (nameIdx < 0) continue;
+    for (const sheetName of wb.SheetNames) {
+      if (/summary|log|detail/i.test(sheetName)) continue; // skip non-person sheets
 
-      // Name is in the next non-empty cell(s)
-      let rawName = '';
-      for (let ci = nameIdx + 1; ci < row.length; ci++) {
-        const val = String(row[ci]).trim();
-        if (val && val !== ':') { rawName = val; break; }
-      }
-      if (!rawName) continue;
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-      // Scan the next few rows for time patterns HH:MM
-      let check_in = null, check_out = null;
-      for (let j = i + 1; j < Math.min(i + 6, rows.length); j++) {
-        const tsRow = rows[j] || [];
-        const allTimes = [];
-        for (const cell of tsRow) {
-          const s = String(cell || '').trim();
-          // Each cell may contain multiple times separated by newlines
-          const found = s.split(/[\n\r,\s]+/).filter(t => /^\d{1,2}:\d{2}(:\d{2})?$/.test(t));
-          allTimes.push(...found);
-        }
-        if (allTimes.length > 0) {
-          check_in  = allTimes[0].substring(0, 5).padStart(5, '0');
-          check_out = allTimes.length > 1 ? allTimes[allTimes.length - 1].substring(0, 5).padStart(5, '0') : null;
+      // Find the sub-header row that has multiple "In" and "Out" values
+      let amInCol = -1, amOutCol = -1, pmInCol = -1, pmOutCol = -1;
+      let headerRowIdx = -1;
+
+      for (let r = 0; r < Math.min(15, rows.length); r++) {
+        const row = rows[r] || [];
+        const lower = row.map(c => String(c).trim().toLowerCase());
+        const inIdxs  = lower.reduce((a, v, i) => { if (v === 'in')  a.push(i); return a; }, []);
+        const outIdxs = lower.reduce((a, v, i) => { if (v === 'out') a.push(i); return a; }, []);
+
+        if (inIdxs.length >= 2 && outIdxs.length >= 2) {
+          headerRowIdx = r;
+          amInCol  = inIdxs[0];
+          amOutCol = outIdxs[0];
+          pmInCol  = inIdxs[1];
+          pmOutCol = outIdxs[1];
           break;
         }
       }
-      timesMap[rawName.toLowerCase()] = { check_in, check_out };
+      if (headerRowIdx < 0) continue;
+
+      // Scan data rows — first row that starts with a day number (e.g. "27 Fr")
+      for (let r = headerRowIdx + 1; r < rows.length; r++) {
+        const row = rows[r] || [];
+        const ddww = String(row[0] || '').trim();
+        if (!ddww || !/^\d/.test(ddww)) continue;
+
+        const check_in  = parseTimeFromCell(row[amInCol]);
+        const lunch_out = parseTimeFromCell(row[amOutCol]);
+        const lunch_in  = parseTimeFromCell(row[pmInCol]);
+        const check_out = parseTimeFromCell(row[pmOutCol]);
+
+        if (check_in || check_out) {
+          timesMap[sheetName.toLowerCase()] = { check_in, lunch_out, lunch_in, check_out };
+          break; // first data row is enough (single-day report)
+        }
+      }
     }
     return timesMap;
   }
@@ -318,8 +349,8 @@ module.exports = function (db, notify) {
     }
 
     const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
-    // Get times from Logs sheet if available
-    const timesMap = extractTimesFromLogSheet(wb);
+    // Get all 4 times from individual per-person sheets
+    const timesMap = extractTimesFromPersonSheets(wb);
 
     const records = [];
     for (let r = dataStart; r < rows.length; r++) {
@@ -338,13 +369,15 @@ module.exports = function (db, notify) {
       const isAbsent = actualHrs === 0 || abVal === '1';
       const status = isAbsent ? 'absent' : 'present';
 
-      // Get times from Logs sheet
-      const times = timesMap[rawName.toLowerCase()];
-      const check_in  = isAbsent ? null : (times?.check_in  || null);
-      const check_out = isAbsent ? null : (times?.check_out || null);
+      // Get all 4 times from the person's individual sheet
+      const times = isAbsent ? null : timesMap[rawName.toLowerCase()];
+      const check_in  = times?.check_in  || null;
+      const lunch_out = times?.lunch_out || null;
+      const lunch_in  = times?.lunch_in  || null;
+      const check_out = times?.check_out || null;
 
       const matched = matchStaffByName(rawName, allStaff);
-      records.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, check_out, status });
+      records.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, lunch_out, lunch_in, check_out, status });
     }
 
     if (records.length === 0) return null;
@@ -421,11 +454,11 @@ module.exports = function (db, notify) {
 
         const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(rec.staffId, rec.date);
         if (existing) {
-          db.prepare(`UPDATE attendance SET check_in=?, check_out=?, status=?, notes=? WHERE id=?`)
-            .run(rec.check_in, rec.check_out, rec.status, 'Thumbprint machine', existing.id);
+          db.prepare(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`)
+            .run(rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine', existing.id);
         } else {
-          db.prepare(`INSERT INTO attendance (staff_id, date, check_in, check_out, status, notes) VALUES (?,?,?,?,?,?)`)
-            .run(rec.staffId, rec.date, rec.check_in, rec.check_out, rec.status, 'Thumbprint machine');
+          db.prepare(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`)
+            .run(rec.staffId, rec.date, rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine');
         }
         imported++;
       }

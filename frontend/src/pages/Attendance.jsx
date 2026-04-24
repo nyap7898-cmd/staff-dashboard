@@ -36,7 +36,9 @@ export default function Attendance() {
       ...prev,
       [r.id || r.staff_id]: {
         staff_id: r.staff_id,
-        check_in: r.check_in || '',
+        check_in:  r.check_in  || '',
+        lunch_out: r.lunch_out || '',
+        lunch_in:  r.lunch_in  || '',
         check_out: r.check_out || '',
         status: r.status || 'present',
         notes: r.notes || '',
@@ -182,6 +184,8 @@ export default function Attendance() {
               <tr>
                 <th className="text-left px-5 py-3">Name</th>
                 <th className="text-left px-4 py-3">Check In</th>
+                <th className="text-left px-4 py-3">Lunch Out</th>
+                <th className="text-left px-4 py-3">Lunch In</th>
                 <th className="text-left px-4 py-3">Check Out</th>
                 <th className="text-left px-4 py-3">Status</th>
                 <th className="text-left px-4 py-3">Notes</th>
@@ -202,6 +206,14 @@ export default function Attendance() {
                             className="border rounded px-2 py-1 text-xs w-24" />
                         </td>
                         <td className="px-4 py-2">
+                          <input type="time" value={ed.lunch_out} onChange={e => updateEdit(key, 'lunch_out', e.target.value)}
+                            className="border rounded px-2 py-1 text-xs w-24" />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input type="time" value={ed.lunch_in} onChange={e => updateEdit(key, 'lunch_in', e.target.value)}
+                            className="border rounded px-2 py-1 text-xs w-24" />
+                        </td>
+                        <td className="px-4 py-2">
                           <input type="time" value={ed.check_out} onChange={e => updateEdit(key, 'check_out', e.target.value)}
                             className="border rounded px-2 py-1 text-xs w-24" />
                         </td>
@@ -213,7 +225,7 @@ export default function Attendance() {
                         </td>
                         <td className="px-4 py-2">
                           <input value={ed.notes} onChange={e => updateEdit(key, 'notes', e.target.value)}
-                            className="border rounded px-2 py-1 text-xs w-32" placeholder="Notes" />
+                            className="border rounded px-2 py-1 text-xs w-28" placeholder="Notes" />
                         </td>
                         <td className="px-4 py-2 flex gap-2">
                           <button onClick={() => saveRow(key, r.staff_id)} disabled={saving[key]}
@@ -226,7 +238,9 @@ export default function Attendance() {
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 text-gray-600">{r.check_in || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-gray-600">{r.check_in  || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{r.lunch_out || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{r.lunch_in  || <span className="text-gray-300">—</span>}</td>
                         <td className="px-4 py-3 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
                         <td className="px-4 py-3">
                           {r.status ? <Badge status={r.status} /> : <span className="text-gray-300 text-xs">Not marked</span>}
@@ -303,6 +317,8 @@ export default function Attendance() {
                       <th className="text-left px-4 py-2">Machine Name</th>
                       <th className="text-left px-4 py-2">Matched Staff</th>
                       <th className="text-left px-4 py-2">Check In</th>
+                      <th className="text-left px-4 py-2">Lunch Out</th>
+                      <th className="text-left px-4 py-2">Lunch In</th>
                       <th className="text-left px-4 py-2">Check Out</th>
                       <th className="text-left px-4 py-2">Status</th>
                     </tr>
@@ -333,7 +349,9 @@ export default function Attendance() {
                               )
                             }
                           </td>
-                          <td className="px-4 py-2 text-gray-600">{r.check_in || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-2 text-gray-600">{r.check_in  || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_out || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_in  || <span className="text-gray-300">—</span>}</td>
                           <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
                           <td className="px-4 py-2">
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${

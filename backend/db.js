@@ -126,6 +126,8 @@ function createTables(db) {
       staff_id INTEGER REFERENCES staff(id),
       date TEXT NOT NULL,
       check_in TEXT,
+      lunch_out TEXT,
+      lunch_in TEXT,
       check_out TEXT,
       status TEXT CHECK(status IN ('present','absent','on_leave','half_day')),
       notes TEXT,
@@ -163,6 +165,8 @@ function createTables(db) {
   try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_name TEXT`); db._save(); } catch {}
   try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN half_day_period TEXT`); db._save(); } catch {}
   try { db._db.exec(`ALTER TABLE staff ADD COLUMN staff_pin TEXT`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE attendance ADD COLUMN lunch_out TEXT`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE attendance ADD COLUMN lunch_in TEXT`); db._save(); } catch {}
 }
 
 function seedData(db) {
