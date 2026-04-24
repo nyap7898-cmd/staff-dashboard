@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import axios from 'axios'
 import Badge from '../components/Badge.jsx'
 
@@ -71,8 +71,8 @@ export default function LeaveApproval() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {pending.map(l => (
-                  <>
-                    <tr key={l.id}
+                  <Fragment key={l.id}>
+                    <tr
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setExpanded(expanded === l.id ? null : l.id)}
                     >
@@ -103,7 +103,7 @@ export default function LeaveApproval() {
                       </td>
                     </tr>
                     {expanded === l.id && (
-                      <tr key={`${l.id}-detail`} className="bg-blue-50">
+                      <tr className="bg-blue-50">
                         <td colSpan={8} className="px-6 py-4">
                           <div className="text-sm space-y-1 text-gray-700">
                             <div><span className="font-medium text-gray-500 w-28 inline-block">Staff:</span>{l.name} ({l.department})</div>
@@ -129,7 +129,7 @@ export default function LeaveApproval() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
