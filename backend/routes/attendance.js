@@ -282,7 +282,7 @@ module.exports = function (db, notify) {
       const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
       const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
 
-      res.json({ isMachineFormat: true, date: detected.date, records });
+      res.json({ isMachineFormat: true, date: detected.date, records, allStaff });
     } catch (e) {
       res.status(400).json({ error: 'Could not read file: ' + e.message });
     }
@@ -300,10 +300,20 @@ module.exports = function (db, notify) {
       const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
       const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
 
+      // Manual overrides: { "yap": "5", "ming": "3", ... } rawName → staffId
+      let overrides = {};
+      try { overrides = JSON.parse(req.body.overrides || '{}'); } catch {}
+
       let imported = 0, skipped = 0;
       const unmatched = [];
 
       for (const rec of records) {
+        // Apply manual override if provided
+        if (!rec.staffId && overrides[rec.rawName]) {
+          rec.staffId = parseInt(overrides[rec.rawName]);
+          const s = allStaff.find(x => x.id === rec.staffId);
+          rec.staffName = s ? s.name : null;
+        }
         if (!rec.staffId) { unmatched.push(rec.rawName); skipped++; continue; }
 
         const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(rec.staffId, rec.date);

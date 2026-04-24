@@ -17,6 +17,7 @@ export default function Attendance() {
   const [parsing, setParsing] = useState(false)
   const [parseResult, setParseResult] = useState(null)   // generic format
   const [machineResult, setMachineResult] = useState(null) // machine format preview
+  const [nameOverrides, setNameOverrides] = useState({})  // { rawName: staffId }
   const [mapping, setMapping] = useState({ nameCol: '', dateCol: '', checkInCol: '', checkOutCol: '' })
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
@@ -71,6 +72,7 @@ export default function Attendance() {
       const machineRes = await axios.post('/api/attendance/parse-machine', fd)
       if (machineRes.data.isMachineFormat) {
         setMachineResult(machineRes.data)
+        setNameOverrides({})
         setParsing(false)
         return
       }
@@ -119,6 +121,7 @@ export default function Attendance() {
     try {
       const fd = new FormData()
       fd.append('file', uploadFile)
+      fd.append('overrides', JSON.stringify(nameOverrides))
       const res = await axios.post('/api/attendance/import-machine', fd)
       setImportResult(res.data)
       // If the imported date is the currently viewed date, refresh the table
@@ -136,6 +139,7 @@ export default function Attendance() {
     setUploadFile(null)
     setParseResult(null)
     setMachineResult(null)
+    setNameOverrides({})
     setImportResult(null)
     setMapping({ nameCol: '', dateCol: '', checkInCol: '', checkOutCol: '' })
     if (fileRef.current) fileRef.current.value = ''
@@ -307,23 +311,41 @@ export default function Attendance() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {machineResult.records.map((r, i) => (
-                      <tr key={i} className={r.staffName ? 'hover:bg-gray-50' : 'bg-red-50'}>
-                        <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.rawName}</td>
-                        <td className="px-4 py-2">
-                          {r.staffName
-                            ? <span className="text-green-700 font-medium">{r.staffName}</span>
-                            : <span className="text-red-500 text-xs">⚠ Not matched</span>}
-                        </td>
-                        <td className="px-4 py-2 text-gray-600">{r.check_in || <span className="text-gray-300">—</span>}</td>
-                        <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
-                        <td className="px-4 py-2">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                            r.status === 'present' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                          }`}>{r.status}</span>
-                        </td>
-                      </tr>
-                    ))}
+                    {machineResult.records.map((r, i) => {
+                      const isMatched = r.staffName || nameOverrides[r.rawName]
+                      const overrideName = nameOverrides[r.rawName]
+                        ? (machineResult.allStaff || []).find(s => String(s.id) === String(nameOverrides[r.rawName]))?.name
+                        : null
+                      return (
+                        <tr key={i} className={isMatched ? 'hover:bg-gray-50' : 'bg-red-50'}>
+                          <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.rawName}</td>
+                          <td className="px-4 py-2">
+                            {r.staffName
+                              ? <span className="text-green-700 font-medium">{r.staffName}</span>
+                              : (
+                                <select
+                                  value={nameOverrides[r.rawName] || ''}
+                                  onChange={e => setNameOverrides(prev => ({ ...prev, [r.rawName]: e.target.value }))}
+                                  className="text-xs border border-red-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                >
+                                  <option value="">⚠ Select staff...</option>
+                                  {(machineResult.allStaff || []).map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                  ))}
+                                </select>
+                              )
+                            }
+                          </td>
+                          <td className="px-4 py-2 text-gray-600">{r.check_in || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
+                          <td className="px-4 py-2">
+                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                              r.status === 'present' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>{r.status}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
