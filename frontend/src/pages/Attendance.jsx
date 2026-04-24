@@ -78,11 +78,15 @@ export default function Attendance() {
         setParsing(false)
         return
       }
-      // Machine not detected — show helpful debug info then stop
-      // (don't try generic parser for machine files — it produces garbage)
+      // Machine not detected — show debug info
       const sheets = machineRes.data.sheets || []
+      const debugSheets = machineRes.data.debugSheets || []
+      const debugError = machineRes.data.debugError || ''
+      const debugInfo = debugSheets.map(s =>
+        `[${s.name}] row0: ${(s.rows[0] || []).join('|')} row1: ${(s.rows[1] || []).join('|')}`
+      ).join('\n')
       setParseResult({
-        error: `Could not detect thumbprint machine format. Sheets found: [${sheets.join(', ') || 'none'}]. Make sure you are uploading the correct XLS file from the machine.`
+        error: `Could not detect thumbprint machine format.\nSheets: [${sheets.join(', ') || 'none'}]${debugError ? `\nError: ${debugError}` : ''}\n${debugInfo}`
       })
     } catch (e) {
       setParseResult({ error: e.response?.data?.error || 'Failed to read file' })

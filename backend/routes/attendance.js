@@ -349,8 +349,9 @@ module.exports = function (db, notify) {
     }
 
     const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
-    // Get all 4 times from individual per-person sheets
-    const timesMap = extractTimesFromPersonSheets(wb);
+    // Get all 4 times from individual per-person sheets (wrapped in try-catch so any parse error doesn't kill the whole import)
+    let timesMap = {};
+    try { timesMap = extractTimesFromPersonSheets(wb); } catch (e) { /* times unavailable — still import presence/absence */ }
 
     const records = [];
     for (let r = dataStart; r < rows.length; r++) {
@@ -414,10 +415,28 @@ module.exports = function (db, notify) {
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
       const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
-      const detected = detectMachineFormat(wb, allStaff);
-      if (!detected) {
-        return res.json({ isMachineFormat: false, sheets: wb.SheetNames });
+
+      // Attempt detection and collect debug info
+      let detected = null;
+      let debugError = null;
+      try {
+        detected = detectMachineFormat(wb, allStaff);
+      } catch (e) {
+        debugError = e.message;
       }
+
+      if (!detected) {
+        // Return sheet names + first few rows of each sheet for debugging
+        const debugSheets = wb.SheetNames.slice(0, 5).map(name => {
+          try {
+            const s = wb.Sheets[name];
+            const rows = XLSX.utils.sheet_to_json(s, { header: 1, defval: '' });
+            return { name, rows: rows.slice(0, 3).map(r => r.slice(0, 6).map(c => String(c).trim())) };
+          } catch (e) { return { name, rows: [], error: e.message }; }
+        });
+        return res.json({ isMachineFormat: false, sheets: wb.SheetNames, debugSheets, debugError });
+      }
+
       res.json({ isMachineFormat: true, date: detected.date, sheet: detected.sheetName, records: detected.records, allStaff });
     } catch (e) {
       res.status(400).json({ error: 'Could not read file: ' + e.message });
