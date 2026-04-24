@@ -116,48 +116,54 @@ export default function LeaveApplyForm() {
             </div>
           </div>
 
-          {/* Days — always visible, auto-calculated once dates are picked */}
+          {/* Days */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Number of Days *
-              {autoDays > 0
-                ? <span className="text-xs text-gray-400 font-normal ml-2">— auto-calculated from dates, adjust if needed</span>
-                : <span className="text-xs text-gray-400 font-normal ml-2">— select dates above to auto-calculate, or pick below</span>}
-            </label>
-            <div className="flex items-center gap-3">
-              <input
-                type="number"
-                min="0.5"
-                step="0.5"
-                value={customDays !== '' ? customDays : (autoDays > 0 ? autoDays : '')}
-                placeholder="0"
-                onChange={e => setCustomDays(e.target.value)}
-                className="w-32 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
-              />
-              <span className="text-sm text-gray-500">
-                {days === 0.5 ? 'half day' : days === 1 ? 'day' : days > 0 ? 'days' : ''}
-                {autoDays > 0 && customDays !== '' && parseFloat(customDays) !== autoDays && (
-                  <button type="button" onClick={() => setCustomDays('')}
-                    className="ml-3 text-xs text-blue-500 hover:underline">
-                    reset to {autoDays}
-                  </button>
-                )}
+            <label className="block text-sm font-medium text-gray-700 mb-2">Number of Days *</label>
+
+            {/* Half-day yellow checkbox — always visible */}
+            <button
+              type="button"
+              onClick={() => setCustomDays(customDays === '0.5' ? '' : '0.5')}
+              className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl border-2 font-medium text-sm transition-colors mb-3 ${
+                days === 0.5
+                  ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-yellow-300 hover:bg-yellow-50'
+              }`}
+            >
+              <span className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                days === 0.5 ? 'bg-yellow-400 border-yellow-400' : 'border-gray-300 bg-white'
+              }`}>
+                {days === 0.5 && <span className="text-white text-xs font-bold">✓</span>}
               </span>
-            </div>
-            {/* Quick-select — always show 0.5 and 1; show more based on autoDays */}
-            <div className="flex gap-2 mt-2 flex-wrap">
-              {[0.5, 1, 1.5, 2, 2.5, 3, 4, 5].filter(d => autoDays > 0 ? d <= autoDays : d <= 1).map(d => (
-                <button key={d} type="button" onClick={() => setCustomDays(String(d))}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                    days === d ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                  }`}>
-                  {d === 0.5 ? '½ day' : d === 1 ? '1 day' : `${d} days`}
-                </button>
-              ))}
-              {autoDays > 3 && (
-                <span className="text-xs text-gray-400 self-center">or type any amount above</span>
-              )}
-            </div>
+              <span>½ Day <span className="font-normal text-xs ml-1 opacity-70">(0.5 days — morning or afternoon only)</span></span>
+            </button>
+
+            {/* Full days — shown when not half-day */}
+            {days !== 0.5 && (
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={customDays !== '' ? customDays : (autoDays > 0 ? autoDays : '')}
+                  placeholder={autoDays > 0 ? String(autoDays) : '1'}
+                  onChange={e => setCustomDays(e.target.value)}
+                  className="w-24 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
+                />
+                <span className="text-sm text-gray-500">
+                  {days === 1 ? 'day' : 'days'}
+                  {autoDays > 0 && (
+                    <span className="ml-2 text-xs text-gray-400">
+                      (auto: {autoDays})
+                      {customDays !== '' && parseFloat(customDays) !== autoDays && (
+                        <button type="button" onClick={() => setCustomDays('')}
+                          className="ml-2 text-blue-500 hover:underline">reset</button>
+                      )}
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Reason */}
