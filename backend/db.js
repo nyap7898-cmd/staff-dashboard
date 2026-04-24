@@ -162,6 +162,7 @@ function createTables(db) {
   try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_mime TEXT`); db._save(); } catch {}
   try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_name TEXT`); db._save(); } catch {}
   try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN half_day_period TEXT`); db._save(); } catch {}
+  try { db._db.exec(`ALTER TABLE staff ADD COLUMN staff_pin TEXT`); db._save(); } catch {}
 }
 
 function seedData(db) {

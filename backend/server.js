@@ -39,7 +39,13 @@ async function main() {
     } else if (pin === process.env.HR_PIN) {
       res.json({ success: true, role: 'hr', name: 'HR Manager' });
     } else {
-      res.status(401).json({ success: false, message: 'Invalid PIN' });
+      // Check staff PINs
+      const staff = db.prepare('SELECT id, name FROM staff WHERE staff_pin=? AND is_active=1').get(pin);
+      if (staff) {
+        res.json({ success: true, role: 'staff', name: staff.name, staff_id: staff.id });
+      } else {
+        res.status(401).json({ success: false, message: 'Invalid PIN' });
+      }
     }
   });
 

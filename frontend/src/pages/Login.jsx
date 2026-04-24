@@ -18,8 +18,10 @@ export default function Login() {
         localStorage.setItem('director_auth', '1')
         localStorage.setItem('user_role', res.data.role)
         localStorage.setItem('user_name', res.data.name)
+        if (res.data.staff_id) localStorage.setItem('user_staff_id', res.data.staff_id)
+        else localStorage.removeItem('user_staff_id')
         axios.defaults.headers.common['x-user-role'] = res.data.role
-        navigate('/overview')
+        navigate(res.data.role === 'staff' ? '/my-leave' : '/overview')
       }
     } catch {
       setError('Invalid PIN. Please try again.')

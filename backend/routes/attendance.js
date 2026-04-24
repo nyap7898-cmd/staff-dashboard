@@ -219,85 +219,156 @@ module.exports = function (db, notify) {
 
   // ─── Thumbprint machine format helpers ───────────────────────────────────────
 
-  function detectMachineFormat(wb) {
-    // Try sheets named Log/Detail first, then try ALL sheets
-    const preferred = wb.SheetNames.find(n => /log|detail/i.test(n));
-    const sheetsToTry = preferred
-      ? [preferred, ...wb.SheetNames.filter(n => n !== preferred)]
-      : wb.SheetNames;
-
-    for (const sheetName of sheetsToTry) {
-      const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      if (rows.length < 4) continue;
-
-      // Scan first 10 rows for a date pattern like 2026/02/27
-      let date = null;
-      for (let r = 0; r < Math.min(10, rows.length); r++) {
-        const rowStr = (rows[r] || []).map(c => String(c)).join(' ');
-        const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
-        if (m) { date = `${m[1]}-${m[2]}-${m[3]}`; break; }
-      }
-      if (!date) continue;
-
-      // Confirm it has the block structure: look for a row containing "Name :" pattern
-      const hasNameRow = rows.some(row =>
-        (row || []).some(c => String(c).includes('Name'))
-      );
-      if (!hasNameRow) continue;
-
-      return { logName: sheetName, rows, date };
-    }
-    return null;
+  // Fuzzy match a raw name string to a staff record
+  function matchStaffByName(rawName, allStaff) {
+    const n = rawName.toLowerCase().trim();
+    return allStaff.find(s => {
+      const sn = s.name.toLowerCase();
+      const parts = sn.split(' ');
+      return sn === n || sn.includes(n) || n.includes(sn) ||
+        parts.some(p => p.length >= 2 && (p === n || p.startsWith(n) || n.startsWith(p)));
+    });
   }
 
-  function parseMachineBlocks(rows, date, allStaff) {
-    const results = [];
+  // Extract check-in/check-out times from the Logs sheet (block format)
+  // Returns { "yap": { check_in: "08:28", check_out: "16:23" }, ... }
+  function extractTimesFromLogSheet(wb) {
+    const logName = wb.SheetNames.find(n => /log|detail/i.test(n));
+    if (!logName) return {};
+    const sheet = wb.Sheets[logName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const timesMap = {};
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] || [];
-      const rowStr = row.map(c => String(c)).join(' ');
+      // Look for a row that has a cell containing "Name" (marks a staff block header)
+      const nameIdx = row.findIndex(c => /^Name\s*[:：]?$/.test(String(c).trim()));
+      if (nameIdx < 0) continue;
 
-      // Find rows that contain "Name :" — this marks a staff block
-      if (!rowStr.includes('Name')) continue;
-
-      // Extract name: look for non-empty cell after "Name :" pattern
-      // Standard format: [..., "Name :", "", "yap", ...]
-      // Find index of the cell containing "Name"
+      // Name is in the next non-empty cell(s)
       let rawName = '';
-      for (let col = 0; col < row.length; col++) {
-        if (String(row[col]).includes('Name')) {
-          // Name value is usually 2 cells after "Name :"
-          rawName = String(row[col + 2] || row[col + 1] || '').trim();
-          if (rawName && rawName !== ':') break;
+      for (let ci = nameIdx + 1; ci < row.length; ci++) {
+        const val = String(row[ci]).trim();
+        if (val && val !== ':') { rawName = val; break; }
+      }
+      if (!rawName) continue;
+
+      // Scan the next few rows for time patterns HH:MM
+      let check_in = null, check_out = null;
+      for (let j = i + 1; j < Math.min(i + 6, rows.length); j++) {
+        const tsRow = rows[j] || [];
+        const allTimes = [];
+        for (const cell of tsRow) {
+          const s = String(cell || '').trim();
+          // Each cell may contain multiple times separated by newlines
+          const found = s.split(/[\n\r,\s]+/).filter(t => /^\d{1,2}:\d{2}(:\d{2})?$/.test(t));
+          allTimes.push(...found);
+        }
+        if (allTimes.length > 0) {
+          check_in  = allTimes[0].substring(0, 5).padStart(5, '0');
+          check_out = allTimes.length > 1 ? allTimes[allTimes.length - 1].substring(0, 5).padStart(5, '0') : null;
+          break;
         }
       }
-      if (!rawName || rawName === ':') continue;
-
-      // Timestamp row is the next row
-      const tsRow = rows[i + 1] || [];
-      const tsCell = String(tsRow[0] || '').trim();
-      const times = tsCell
-        .split(/[\n\r]+/)
-        .map(t => t.trim())
-        .filter(t => /^\d{1,2}:\d{2}$/.test(t));
-
-      const check_in  = times.length > 0 ? times[0].padStart(5, '0') : null;
-      const check_out = times.length > 1 ? times[times.length - 1].padStart(5, '0') : null;
-      const status    = check_in ? 'present' : 'absent';
-
-      // Fuzzy match to staff
-      const n = rawName.toLowerCase();
-      const matched = allStaff.find(s => {
-        const sn = s.name.toLowerCase();
-        const parts = sn.split(' ');
-        return sn === n || sn.includes(n) || n.includes(sn) ||
-          parts.some(p => p === n || p.startsWith(n) || n.startsWith(p));
-      });
-
-      results.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, check_out, status });
+      timesMap[rawName.toLowerCase()] = { check_in, check_out };
     }
-    return results;
+    return timesMap;
+  }
+
+  // Parse the Summary sheet (tabular format)
+  // Row 0: "Summary of Attendance"
+  // Row 1: ["Date: ", "2026/02/27 ~ ...", ...]
+  // Row 2-3: headers
+  // Row 4+: [No, Name, Dept, Scheduled, Actual_hrs, ..., AB]
+  function parseSummarySheet(wb, sheetName, allStaff) {
+    const sheet = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rows.length < 5) return null;
+
+    // Extract date from first 5 rows
+    let date = null;
+    for (let r = 0; r < Math.min(5, rows.length); r++) {
+      const rowStr = (rows[r] || []).map(c => String(c)).join(' ');
+      const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+      if (m) { date = `${m[1]}-${m[2]}-${m[3]}`; break; }
+    }
+    if (!date) return null;
+
+    // Find header row (contains "Name" and "No")
+    let headerRowIdx = -1;
+    let nameCol = 1, actualCol = 4, abCol = -1;
+    for (let r = 0; r < Math.min(8, rows.length); r++) {
+      const row = rows[r] || [];
+      const lower = row.map(c => String(c).trim().toLowerCase());
+      if (lower.includes('name') && (lower.includes('no') || lower.includes('no.'))) {
+        headerRowIdx = r;
+        nameCol    = lower.indexOf('name');
+        // Find actual hours column
+        const actualIdx = lower.findIndex(h => h.includes('actual') || h.includes('work hour') || h.includes('real'));
+        if (actualIdx >= 0) actualCol = actualIdx;
+        // Find AB (absent) column
+        const abIdx = row.findIndex(c => String(c).trim().toUpperCase() === 'AB');
+        if (abIdx >= 0) abCol = abIdx;
+        break;
+      }
+    }
+
+    const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
+    // Get times from Logs sheet if available
+    const timesMap = extractTimesFromLogSheet(wb);
+
+    const records = [];
+    for (let r = dataStart; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const noVal   = String(row[0] || '').trim();
+      const rawName = String(row[nameCol] || '').trim();
+
+      if (!rawName) continue;
+      // Skip if "No" column isn't a valid small integer (e.g. skip total/summary rows)
+      const noNum = parseFloat(noVal);
+      if (isNaN(noNum) || noNum <= 0 || noNum > 9000) continue;
+
+      const actualHrs = parseFloat(String(row[actualCol] || '0').replace(/[^\d.]/g, '')) || 0;
+      // AB column: "1" means absent. Fallback: actualHrs === 0
+      const abVal = abCol >= 0 ? String(row[abCol] || '').trim() : '';
+      const isAbsent = actualHrs === 0 || abVal === '1';
+      const status = isAbsent ? 'absent' : 'present';
+
+      // Get times from Logs sheet
+      const times = timesMap[rawName.toLowerCase()];
+      const check_in  = isAbsent ? null : (times?.check_in  || null);
+      const check_out = isAbsent ? null : (times?.check_out || null);
+
+      const matched = matchStaffByName(rawName, allStaff);
+      records.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, check_out, status });
+    }
+
+    if (records.length === 0) return null;
+    return { sheetName, date, records };
+  }
+
+  // Main detection: tries Summary sheet first, then falls back to Log/Detail sheet block parsing
+  function detectMachineFormat(wb, allStaff) {
+    // Strategy 1: Summary sheet (clean tabular data)
+    const summaryName = wb.SheetNames.find(n => /summary/i.test(n));
+    if (summaryName) {
+      const result = parseSummarySheet(wb, summaryName, allStaff);
+      if (result) return result;
+    }
+
+    // Strategy 2: Try every sheet for summary-style data
+    for (const name of wb.SheetNames) {
+      if (name === summaryName) continue;
+      const result = parseSummarySheet(wb, name, allStaff);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  // parseMachineBlocks is now unused but kept for safety
+  function parseMachineBlocks(rows, date, allStaff) {
+    return [];
   }
 
   // POST /api/attendance/parse-machine — detect & preview thumbprint machine XLS
@@ -305,16 +376,12 @@ module.exports = function (db, notify) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-      const detected = detectMachineFormat(wb);
+      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const detected = detectMachineFormat(wb, allStaff);
       if (!detected) {
-        // Return sheet names so frontend can show debug info
         return res.json({ isMachineFormat: false, sheets: wb.SheetNames });
       }
-
-      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
-      const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
-
-      res.json({ isMachineFormat: true, date: detected.date, sheet: detected.logName, records, allStaff });
+      res.json({ isMachineFormat: true, date: detected.date, sheet: detected.sheetName, records: detected.records, allStaff });
     } catch (e) {
       res.status(400).json({ error: 'Could not read file: ' + e.message });
     }
@@ -326,11 +393,11 @@ module.exports = function (db, notify) {
     const role = req.headers['x-user-role'] || 'unknown';
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-      const detected = detectMachineFormat(wb);
+      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const detected = detectMachineFormat(wb, allStaff);
       if (!detected) return res.status(400).json({ error: 'Not a recognised machine format' });
 
-      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
-      const records  = parseMachineBlocks(detected.rows, detected.date, allStaff);
+      const records = detected.records;
 
       // Manual overrides: { "yap": "5", "ming": "3", ... } rawName → staffId
       let overrides = {};

@@ -20,6 +20,11 @@ const hrNav = [
   { to: '/staff', label: 'Staff Profiles', icon: '👤' },
 ]
 
+const staffNav = [
+  { to: '/my-leave', label: 'My Leave', icon: '📅' },
+  { to: '/leave-apply', label: 'Apply Leave', icon: '✏️' },
+]
+
 export default function Layout() {
   const navigate = useNavigate()
   const role = localStorage.getItem('user_role') || 'hr'
