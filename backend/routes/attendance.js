@@ -236,76 +236,55 @@ module.exports = function (db, notify) {
     });
   }
 
-  // Parse a time cell value (HH:MM string or Excel decimal fraction)
-  function parseTimeFromCell(val) {
-    if (!val && val !== 0) return null;
-    const s = String(val).trim();
-    if (!s) return null;
-    // HH:MM or HH:MM:SS
-    const m = s.match(/(\d{1,2}):(\d{2})/);
-    if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
-    // Excel time as decimal fraction (e.g. 0.354166... = 08:30)
-    const n = parseFloat(s);
-    if (!isNaN(n) && n > 0 && n < 1) {
-      const totalMin = Math.round(n * 24 * 60);
-      return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
-    }
-    return null;
-  }
-
-  // Extract all 4 times (AM In, AM Out, PM In, PM Out) from per-person sheets
-  // Each person has their own sheet named after them (e.g. "yap", "juimah")
-  // Sheet structure:
-  //   header row: [..., "AM", ..., "PM", ..., "Over", ...]   (merged cells)
-  //   sub-header:  [..., "In", "Out", "In", "Out", "In", "Out"]
-  //   data rows:   ["27 Fr", "08:28", "12:11", "14:07", "16:23", ...]
-  // Returns { "yap": { check_in, lunch_out, lunch_in, check_out }, ... }
-  function extractTimesFromPersonSheets(wb) {
+  // Extract times from the Logs sheet, keyed by staff No. (e.g. "1", "2", "4")
+  // Logs sheet block format:
+  //   Row N:   [27, ...]          ← day number
+  //   Row N+1: ["No :", "", "1"]  ← staff No.
+  //   Row N+2: ["08:28\n12:11\n14:07\n16:23\n", ...] ← newline-separated timestamps
+  // Returns { "1": { check_in, lunch_out, lunch_in, check_out }, "2": {...}, ... }
+  function extractTimesFromLogsSheet(wb) {
     const timesMap = {};
+    const logName = wb.SheetNames.find(n => /^log/i.test(n));
+    if (!logName) return timesMap;
 
-    for (const sheetName of wb.SheetNames) {
-      if (/summary|log|detail/i.test(sheetName)) continue; // skip non-person sheets
+    const sheet = wb.Sheets[logName];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-      const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      // Find "No :" rows
+      if (String(row[0]).trim() !== 'No :') continue;
 
-      // Find the sub-header row that has multiple "In" and "Out" values
-      let amInCol = -1, amOutCol = -1, pmInCol = -1, pmOutCol = -1;
-      let headerRowIdx = -1;
+      const staffNo = String(row[2] || '').trim();
+      if (!staffNo || isNaN(Number(staffNo)) || Number(staffNo) > 9000) continue;
 
-      for (let r = 0; r < Math.min(15, rows.length); r++) {
-        const row = rows[r] || [];
-        const lower = row.map(c => String(c).trim().toLowerCase());
-        const inIdxs  = lower.reduce((a, v, i) => { if (v === 'in')  a.push(i); return a; }, []);
-        const outIdxs = lower.reduce((a, v, i) => { if (v === 'out') a.push(i); return a; }, []);
-
-        if (inIdxs.length >= 2 && outIdxs.length >= 2) {
-          headerRowIdx = r;
-          amInCol  = inIdxs[0];
-          amOutCol = outIdxs[0];
-          pmInCol  = inIdxs[1];
-          pmOutCol = outIdxs[1];
-          break;
-        }
+      // The timestamps row is the next row with content (skip blank rows)
+      let times = [];
+      for (let j = i + 1; j < Math.min(i + 4, rows.length); j++) {
+        const tsCell = String((rows[j] || [])[0] || '').trim();
+        if (!tsCell) continue;
+        times = tsCell.split(/[\n\r]+/).map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t));
+        if (times.length > 0) break;
       }
-      if (headerRowIdx < 0) continue;
 
-      // Scan data rows — first row that starts with a day number (e.g. "27 Fr")
-      for (let r = headerRowIdx + 1; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const ddww = String(row[0] || '').trim();
-        if (!ddww || !/^\d/.test(ddww)) continue;
-
-        const check_in  = parseTimeFromCell(row[amInCol]);
-        const lunch_out = parseTimeFromCell(row[amOutCol]);
-        const lunch_in  = parseTimeFromCell(row[pmInCol]);
-        const check_out = parseTimeFromCell(row[pmOutCol]);
-
-        // Store by both sheet name (lowercase) AND trimmed lowercase — covers all naming variations
-        const key = sheetName.toLowerCase().trim();
-        timesMap[key] = { check_in, lunch_out, lunch_in, check_out };
-        break; // first data row is enough (single-day report); store even if times are null
+      let check_in = null, lunch_out = null, lunch_in = null, check_out = null;
+      if (times.length === 1) {
+        check_in = times[0].padStart(5, '0');
+      } else if (times.length === 2) {
+        check_in  = times[0].padStart(5, '0');
+        check_out = times[1].padStart(5, '0');
+      } else if (times.length === 3) {
+        check_in  = times[0].padStart(5, '0');
+        lunch_out = times[1].padStart(5, '0');
+        check_out = times[2].padStart(5, '0');
+      } else if (times.length >= 4) {
+        check_in  = times[0].padStart(5, '0');
+        lunch_out = times[1].padStart(5, '0');
+        lunch_in  = times[2].padStart(5, '0');
+        check_out = times[3].padStart(5, '0');
       }
+
+      if (check_in) timesMap[staffNo] = { check_in, lunch_out, lunch_in, check_out };
     }
     return timesMap;
   }
@@ -349,11 +328,10 @@ module.exports = function (db, notify) {
     }
 
     const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
-    // Get all 4 times from individual per-person sheets
-    // IMPORTANT: we use these times — not Summary sheet actual_hrs — to determine Present/Absent
-    // because the Summary sheet actual_hrs can be 0 even for present staff (e.g. no overtime)
+    // Get times from Logs sheet keyed by staff No. (e.g. "1", "2", "4")
+    // This is more reliable than per-person sheets (which may be corrupt/unnamed in some exports)
     let timesMap = {};
-    try { timesMap = extractTimesFromPersonSheets(wb); } catch (e) { /* fall through — times unavailable */ }
+    try { timesMap = extractTimesFromLogsSheet(wb); } catch (e) { /* fall through */ }
 
     const records = [];
     for (let r = dataStart; r < rows.length; r++) {
@@ -366,15 +344,14 @@ module.exports = function (db, notify) {
       const noNum = parseFloat(noVal);
       if (isNaN(noNum) || noNum <= 0 || noNum > 9000) continue;
 
-      // Get all 4 times from the person's individual sheet
-      const times = timesMap[rawName.toLowerCase()];
+      // Look up times by staff No. (matches Logs sheet blocks "No : 1", "No : 2" etc.)
+      const times = timesMap[String(Math.round(noNum))];
       const check_in  = times?.check_in  || null;
       const lunch_out = times?.lunch_out || null;
       const lunch_in  = times?.lunch_in  || null;
       const check_out = times?.check_out || null;
 
-      // Present = has check-in time in their individual sheet
-      // Absent = no individual sheet found OR no times in it
+      // Present = has check-in time in Logs sheet; Absent = no punches recorded
       const status = check_in ? 'present' : 'absent';
 
       const matched = matchStaffByName(rawName, allStaff);
