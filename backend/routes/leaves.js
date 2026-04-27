@@ -50,6 +50,31 @@ module.exports = function (db, notify) {
     res.json(records);
   });
 
+  // PUT edit a leave record (director/hr only)
+  router.put('/:id', (req, res) => {
+    const { leave_type, start_date, end_date, days, reason, status } = req.body;
+    const role = req.headers['x-user-role'] || 'unknown';
+    const lr = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(req.params.id);
+    if (!lr) return res.status(404).json({ error: 'Not found' });
+    db.prepare(`
+      UPDATE leave_requests SET leave_type=?, start_date=?, end_date=?, days=?, reason=?, status=? WHERE id=?
+    `).run(leave_type, start_date, end_date, parseFloat(days), reason || null, status, req.params.id);
+    const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(lr.staff_id);
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Record Edited', `${staffRow?.name} | ${leave_type} | ${start_date}~${end_date}`);
+    res.json({ success: true });
+  });
+
+  // DELETE a leave record (director/hr only)
+  router.delete('/:id', (req, res) => {
+    const role = req.headers['x-user-role'] || 'unknown';
+    const lr = db.prepare('SELECT * FROM leave_requests WHERE id=?').get(req.params.id);
+    if (!lr) return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM leave_requests WHERE id=?').run(req.params.id);
+    const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(lr.staff_id);
+    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Leave Record Deleted', `${staffRow?.name} | ${lr.leave_type} | ${lr.start_date}~${lr.end_date}`);
+    res.json({ success: true });
+  });
+
   // GET leave requests — filtered by status
   router.get('/', (req, res) => {
     const { status } = req.query;

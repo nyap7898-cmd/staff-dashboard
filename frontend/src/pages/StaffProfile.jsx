@@ -33,6 +33,8 @@ export default function StaffProfile() {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [leaveEdit, setLeaveEdit] = useState(null)   // leave record being edited
+  const [leaveSaving, setLeaveSaving] = useState(false)
   const role = localStorage.getItem('user_role') || 'hr'
 
   useEffect(() => {
@@ -73,6 +75,26 @@ export default function StaffProfile() {
     setStaffList(prev => prev.map(s => s.id === updated.id ? updated : s))
     setEditing(false)
     setSaving(false)
+  }
+
+  async function saveLeaveEdit() {
+    setLeaveSaving(true)
+    await axios.put(`/api/leaves/${leaveEdit.id}`, leaveEdit)
+    setLeaveEdit(null)
+    const hist = await axios.get(`/api/leaves/staff/${selected.id}`)
+    setHistory(hist.data)
+    const bal = await axios.get('/api/leaves/balance')
+    setBalance(bal.data.find(b => b.id === selected.id))
+    setLeaveSaving(false)
+  }
+
+  async function deleteLeave(l) {
+    if (!window.confirm(`Delete this ${l.leave_type} leave (${fmt(l.start_date)} – ${fmt(l.end_date)}, ${l.days} day${l.days !== 1 ? 's' : ''})?`)) return
+    await axios.delete(`/api/leaves/${l.id}`)
+    const hist = await axios.get(`/api/leaves/staff/${selected.id}`)
+    setHistory(hist.data)
+    const bal = await axios.get('/api/leaves/balance')
+    setBalance(bal.data.find(b => b.id === selected.id))
   }
 
   const colIdx = staffList.findIndex(s => s.id === selected?.id) % avatarColours.length
@@ -216,10 +238,56 @@ export default function StaffProfile() {
                       <th className="text-center px-4 py-3">Days</th>
                       <th className="text-left px-4 py-3">Status</th>
                       <th className="text-left px-4 py-3">Reason</th>
+                      <th className="px-4 py-3"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {history.map(l => (
+                    {history.map(l => leaveEdit?.id === l.id ? (
+                      // ── Inline edit row ──
+                      <tr key={l.id} className="bg-blue-50">
+                        <td className="px-4 py-2">
+                          <select value={leaveEdit.leave_type} onChange={e => setLeaveEdit(p=>({...p,leave_type:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs">
+                            {['annual','mc','emergency','unpaid','maternity','paternity'].map(t=>(
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input type="date" value={leaveEdit.start_date} onChange={e => setLeaveEdit(p=>({...p,start_date:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs w-32" />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input type="date" value={leaveEdit.end_date} onChange={e => setLeaveEdit(p=>({...p,end_date:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs w-32" />
+                        </td>
+                        <td className="px-4 py-2">
+                          <input type="number" step="0.5" min="0.5" value={leaveEdit.days} onChange={e => setLeaveEdit(p=>({...p,days:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs w-16 text-center" />
+                        </td>
+                        <td className="px-4 py-2">
+                          <select value={leaveEdit.status} onChange={e => setLeaveEdit(p=>({...p,status:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs">
+                            {['pending','approved','rejected'].map(s=>(
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-4 py-2">
+                          <input value={leaveEdit.reason || ''} onChange={e => setLeaveEdit(p=>({...p,reason:e.target.value}))}
+                            className="border rounded px-2 py-1 text-xs w-28" placeholder="Reason" />
+                        </td>
+                        <td className="px-4 py-2 flex gap-1">
+                          <button onClick={saveLeaveEdit} disabled={leaveSaving}
+                            className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:bg-blue-300">
+                            {leaveSaving ? '...' : 'Save'}
+                          </button>
+                          <button onClick={() => setLeaveEdit(null)}
+                            className="text-xs text-gray-500 hover:text-gray-700 px-1">✕</button>
+                        </td>
+                      </tr>
+                    ) : (
+                      // ── Normal row ──
                       <tr key={l.id} className="hover:bg-gray-50">
                         <td className="px-5 py-3"><Badge status={l.leave_type} /></td>
                         <td className="px-4 py-3 text-gray-600">{fmt(l.start_date)}</td>
@@ -227,6 +295,12 @@ export default function StaffProfile() {
                         <td className="px-4 py-3 text-center font-medium">{l.days}</td>
                         <td className="px-4 py-3"><Badge status={l.status} /></td>
                         <td className="px-4 py-3 text-gray-400 text-xs max-w-xs truncate">{l.reason || '—'}</td>
+                        <td className="px-4 py-3 flex gap-2">
+                          <button onClick={() => setLeaveEdit({...l})}
+                            className="text-xs text-blue-600 hover:underline font-medium">Edit</button>
+                          <button onClick={() => deleteLeave(l)}
+                            className="text-xs text-red-500 hover:underline font-medium">Delete</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
