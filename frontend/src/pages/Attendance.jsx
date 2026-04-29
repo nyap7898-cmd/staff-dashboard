@@ -305,83 +305,116 @@ export default function Attendance() {
           </div>
 
           {/* Machine format: auto-detected preview */}
-          {machineResult && !importResult && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs flex items-center justify-center font-bold">✓</span>
-                <h2 className="font-semibold text-gray-700">Thumbprint machine format detected</h2>
+          {machineResult && !importResult && (() => {
+            // Build unique staff list from records (for name matching)
+            const uniqueStaff = []
+            const seen = new Set()
+            for (const r of machineResult.records) {
+              if (!seen.has(r.rawName)) { seen.add(r.rawName); uniqueStaff.push(r) }
+            }
+            const isMultiDay = machineResult.dates && machineResult.dates.length > 1
+            const dateLabel = machineResult.dateRange || machineResult.date
+            const totalDays = machineResult.dates ? machineResult.dates.length : 1
+            const matchedCount = machineResult.records.filter(r => r.staffName || nameOverrides[r.rawName]).length
+            const staffCount = uniqueStaff.length
+            return (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs flex items-center justify-center font-bold">✓</span>
+                  <h2 className="font-semibold text-gray-700">Thumbprint machine format detected</h2>
+                </div>
+                <div className="ml-8 mb-4 flex flex-wrap gap-4">
+                  <div className="bg-blue-50 rounded-lg px-3 py-2 text-center">
+                    <div className="text-lg font-bold text-blue-600">{dateLabel}</div>
+                    <div className="text-xs text-blue-400">{isMultiDay ? `${totalDays} days` : '1 day'}</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                    <div className="text-lg font-bold text-gray-700">{staffCount}</div>
+                    <div className="text-xs text-gray-400">staff in file</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                    <div className="text-lg font-bold text-gray-700">{machineResult.records.length}</div>
+                    <div className="text-xs text-gray-400">total records</div>
+                  </div>
+                </div>
+
+                {/* Staff name matching table (unique staff only) */}
+                <div className="overflow-x-auto rounded-lg border border-gray-100 mb-4">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                      <tr>
+                        <th className="text-left px-4 py-2">Machine Name</th>
+                        <th className="text-left px-4 py-2">Matched Staff</th>
+                        {!isMultiDay && <>
+                          <th className="text-left px-4 py-2">Check In</th>
+                          <th className="text-left px-4 py-2">Lunch Out</th>
+                          <th className="text-left px-4 py-2">Lunch In</th>
+                          <th className="text-left px-4 py-2">Check Out</th>
+                          <th className="text-left px-4 py-2">Status</th>
+                        </>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {uniqueStaff.map((r, i) => {
+                        const isMatched = r.staffName || nameOverrides[r.rawName]
+                        return (
+                          <tr key={i} className={isMatched ? 'hover:bg-gray-50' : 'bg-red-50'}>
+                            <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.rawName}</td>
+                            <td className="px-4 py-2">
+                              {r.staffName
+                                ? <span className="text-green-700 font-medium">✓ {r.staffName}</span>
+                                : (
+                                  <select
+                                    value={nameOverrides[r.rawName] || ''}
+                                    onChange={e => setNameOverrides(prev => ({ ...prev, [r.rawName]: e.target.value }))}
+                                    className="text-xs border border-red-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  >
+                                    <option value="">⚠ Select staff...</option>
+                                    {(machineResult.allStaff || []).map(s => (
+                                      <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                  </select>
+                                )
+                              }
+                            </td>
+                            {!isMultiDay && <>
+                              <td className="px-4 py-2 text-gray-600">{r.check_in  || <span className="text-gray-300">—</span>}</td>
+                              <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_out || <span className="text-gray-300">—</span>}</td>
+                              <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_in  || <span className="text-gray-300">—</span>}</td>
+                              <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
+                              <td className="px-4 py-2">
+                                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                  r.status === 'present' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                }`}>{r.status}</span>
+                              </td>
+                            </>}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {isMultiDay && (
+                  <p className="text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-2 mb-3">
+                    📅 Multi-day file: {totalDays} days × {staffCount} staff = <strong>{machineResult.records.length} records</strong> will be imported ({machineResult.dates?.join(', ')})
+                  </p>
+                )}
+                {uniqueStaff.some(r => !r.staffName && !nameOverrides[r.rawName]) && (
+                  <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2 mb-3">
+                    ⚠ Some names couldn't be matched. Make sure staff names in the dashboard include the machine name (e.g. "Yap Ah Kow" matches "yap"). Unmatched staff will be skipped.
+                  </p>
+                )}
+                <button
+                  onClick={handleMachineImport}
+                  disabled={importing}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors"
+                >
+                  {importing ? 'Importing...' : `Import ${matchedCount} records for ${dateLabel}`}
+                </button>
               </div>
-              <p className="text-xs text-gray-400 mb-4 ml-8">
-                Date: <strong>{machineResult.date}</strong> · {machineResult.records.length} staff found in file
-              </p>
-              <div className="overflow-x-auto rounded-lg border border-gray-100 mb-4">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
-                    <tr>
-                      <th className="text-left px-4 py-2">Machine Name</th>
-                      <th className="text-left px-4 py-2">Matched Staff</th>
-                      <th className="text-left px-4 py-2">Check In</th>
-                      <th className="text-left px-4 py-2">Lunch Out</th>
-                      <th className="text-left px-4 py-2">Lunch In</th>
-                      <th className="text-left px-4 py-2">Check Out</th>
-                      <th className="text-left px-4 py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {machineResult.records.map((r, i) => {
-                      const isMatched = r.staffName || nameOverrides[r.rawName]
-                      const overrideName = nameOverrides[r.rawName]
-                        ? (machineResult.allStaff || []).find(s => String(s.id) === String(nameOverrides[r.rawName]))?.name
-                        : null
-                      return (
-                        <tr key={i} className={isMatched ? 'hover:bg-gray-50' : 'bg-red-50'}>
-                          <td className="px-4 py-2 font-mono text-xs text-gray-600">{r.rawName}</td>
-                          <td className="px-4 py-2">
-                            {r.staffName
-                              ? <span className="text-green-700 font-medium">{r.staffName}</span>
-                              : (
-                                <select
-                                  value={nameOverrides[r.rawName] || ''}
-                                  onChange={e => setNameOverrides(prev => ({ ...prev, [r.rawName]: e.target.value }))}
-                                  className="text-xs border border-red-300 rounded px-2 py-1 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                >
-                                  <option value="">⚠ Select staff...</option>
-                                  {(machineResult.allStaff || []).map(s => (
-                                    <option key={s.id} value={s.id}>{s.name}</option>
-                                  ))}
-                                </select>
-                              )
-                            }
-                          </td>
-                          <td className="px-4 py-2 text-gray-600">{r.check_in  || <span className="text-gray-300">—</span>}</td>
-                          <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_out || <span className="text-gray-300">—</span>}</td>
-                          <td className="px-4 py-2 text-gray-500 text-xs">{r.lunch_in  || <span className="text-gray-300">—</span>}</td>
-                          <td className="px-4 py-2 text-gray-600">{r.check_out || <span className="text-gray-300">—</span>}</td>
-                          <td className="px-4 py-2">
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                              r.status === 'present' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                            }`}>{r.status}</span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {machineResult.records.some(r => !r.staffName) && (
-                <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2 mb-3">
-                  ⚠ Some names couldn't be matched. Make sure staff names in the dashboard include the machine name (e.g. "Yap Ah Kow" matches "yap"). Unmatched staff will be skipped.
-                </p>
-              )}
-              <button
-                onClick={handleMachineImport}
-                disabled={importing}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium px-6 py-2.5 rounded-lg text-sm transition-colors"
-              >
-                {importing ? 'Importing...' : `Import ${machineResult.records.filter(r => r.staffName || nameOverrides[r.rawName]).length} records for ${machineResult.date}`}
-              </button>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Machine import result */}
           {machineResult && importResult && (
@@ -405,7 +438,7 @@ export default function Attendance() {
                       <strong>Unmatched:</strong> {importResult.unmatched.join(', ')}
                     </p>
                   )}
-                  <p className="text-xs text-green-600">✅ Attendance for <strong>{importResult.date}</strong> saved successfully.</p>
+                  <p className="text-xs text-green-600">✅ Attendance for <strong>{importResult.dateRange || importResult.date}</strong> saved successfully.</p>
                   <div className="flex gap-3">
                     <button
                       onClick={() => { setTab('manual'); resetUpload() }}

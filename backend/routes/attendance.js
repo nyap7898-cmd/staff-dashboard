@@ -236,155 +236,166 @@ module.exports = function (db, notify) {
     });
   }
 
-  // Extract times from the Logs sheet, keyed by staff No. (e.g. "1", "2", "4")
-  // Logs sheet block format:
-  //   Row N:   [27, ...]          ← day number
-  //   Row N+1: ["No :", "", "1"]  ← staff No.
-  //   Row N+2: ["08:28\n12:11\n14:07\n16:23\n", ...] ← newline-separated timestamps
-  // Returns { "1": { check_in, lunch_out, lunch_in, check_out }, "2": {...}, ... }
+  // Parse timestamps from a Logs cell value (newline-separated times)
+  function parseTimestamps(cellVal) {
+    const s = String(cellVal || '').trim();
+    const times = s.split(/[\n\r]+/).map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t));
+    let check_in = null, lunch_out = null, lunch_in = null, check_out = null;
+    if (times.length === 1) {
+      check_in  = times[0].padStart(5, '0');
+    } else if (times.length === 2) {
+      check_in  = times[0].padStart(5, '0');
+      check_out = times[1].padStart(5, '0');
+    } else if (times.length === 3) {
+      check_in  = times[0].padStart(5, '0');
+      lunch_out = times[1].padStart(5, '0');
+      check_out = times[2].padStart(5, '0');
+    } else if (times.length >= 4) {
+      check_in  = times[0].padStart(5, '0');
+      lunch_out = times[1].padStart(5, '0');
+      lunch_in  = times[2].padStart(5, '0');
+      check_out = times[3].padStart(5, '0');
+    }
+    return { check_in, lunch_out, lunch_in, check_out };
+  }
+
+  // Extract all times from the Logs sheet, keyed by staffNo → dateStr → times
+  // Handles both single-day (1 day column) and multi-day (multiple day columns per row)
+  // Returns: { "1": { "2026-01-28": { check_in, ... }, "2026-01-29": {...} }, "2": {...} }
   function extractTimesFromLogsSheet(wb) {
-    const timesMap = {};
+    const result = {}; // { staffNo: { dateStr: { check_in, ... } } }
     const logName = wb.SheetNames.find(n => /^log/i.test(n));
-    if (!logName) return timesMap;
+    if (!logName) return result;
 
     const sheet = wb.Sheets[logName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
+    // Get year + start month from period header (rows 0-4)
+    let year = null, month = null;
+    for (let r = 0; r < Math.min(5, rows.length); r++) {
+      const rowStr = (rows[r] || []).map(c => String(c)).join(' ');
+      const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+      if (m) { year = m[1]; month = m[2]; break; }
+    }
+    if (!year) return result;
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] || [];
-      // Find "No :" rows
       if (String(row[0]).trim() !== 'No :') continue;
 
       const staffNo = String(row[2] || '').trim();
       if (!staffNo || isNaN(Number(staffNo)) || Number(staffNo) > 9000) continue;
 
-      // The timestamps row is the next row with content (skip blank rows)
-      let times = [];
-      for (let j = i + 1; j < Math.min(i + 4, rows.length); j++) {
-        const tsCell = String((rows[j] || [])[0] || '').trim();
-        if (!tsCell) continue;
-        times = tsCell.split(/[\n\r]+/).map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}$/.test(t));
-        if (times.length > 0) break;
+      // Day numbers are in the row just before "No :" (look up 1-3 rows back)
+      let dayNumRow = [];
+      for (let k = i - 1; k >= Math.max(0, i - 3); k--) {
+        const prev = rows[k] || [];
+        if (prev.some(c => typeof c === 'number' && c >= 1 && c <= 31)) {
+          dayNumRow = prev; break;
+        }
       }
 
-      let check_in = null, lunch_out = null, lunch_in = null, check_out = null;
-      if (times.length === 1) {
-        check_in = times[0].padStart(5, '0');
-      } else if (times.length === 2) {
-        check_in  = times[0].padStart(5, '0');
-        check_out = times[1].padStart(5, '0');
-      } else if (times.length === 3) {
-        check_in  = times[0].padStart(5, '0');
-        lunch_out = times[1].padStart(5, '0');
-        check_out = times[2].padStart(5, '0');
-      } else if (times.length >= 4) {
-        check_in  = times[0].padStart(5, '0');
-        lunch_out = times[1].padStart(5, '0');
-        lunch_in  = times[2].padStart(5, '0');
-        check_out = times[3].padStart(5, '0');
-      }
+      // Timestamps row is the row immediately after "No :"
+      const tsRow = rows[i + 1] || [];
 
-      if (check_in) timesMap[staffNo] = { check_in, lunch_out, lunch_in, check_out };
+      if (!result[staffNo]) result[staffNo] = {};
+
+      // Each column = one day
+      const numCols = Math.max(dayNumRow.length, tsRow.length);
+      for (let col = 0; col < numCols; col++) {
+        const dayNum = dayNumRow[col];
+        if (typeof dayNum !== 'number' || dayNum < 1 || dayNum > 31) continue;
+
+        const dateStr = `${year}-${month}-${String(dayNum).padStart(2, '0')}`;
+        const times = parseTimestamps(tsRow[col]);
+        if (times.check_in) result[staffNo][dateStr] = times;
+      }
     }
-    return timesMap;
+    return result;
   }
 
-  // Parse the Summary sheet (tabular format)
-  // Row 0: "Summary of Attendance"
-  // Row 1: ["Date: ", "2026/02/27 ~ ...", ...]
-  // Row 2-3: headers
-  // Row 4+: [No, Name, Dept, Scheduled, Actual_hrs, ..., AB]
-  function parseSummarySheet(wb, sheetName, allStaff) {
-    const sheet = wb.Sheets[sheetName];
+  // Detect & parse the machine XLS (Summary + Logs sheets)
+  // Returns: { sheetName, dateRange, dates, records[] }
+  function detectMachineFormat(wb, allStaff) {
+    const summaryName = wb.SheetNames.find(n => /summary/i.test(n));
+    if (!summaryName) return null;
+
+    const sheet = wb.Sheets[summaryName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (rows.length < 5) return null;
 
-    // Extract date from first 5 rows
-    let date = null;
+    // Extract date range from row 1: "2026/01/28 ~ 01/31" or "2026/02/27 ~ 02/27"
+    let dateRange = '', year = '', startMonth = '', startDay = '', endDay = '';
     for (let r = 0; r < Math.min(5, rows.length); r++) {
       const rowStr = (rows[r] || []).map(c => String(c)).join(' ');
-      const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})/);
-      if (m) { date = `${m[1]}-${m[2]}-${m[3]}`; break; }
-    }
-    if (!date) return null;
-
-    // Find header row (contains "Name" and "No")
-    let headerRowIdx = -1;
-    let nameCol = 1, actualCol = 4, abCol = -1;
-    for (let r = 0; r < Math.min(8, rows.length); r++) {
-      const row = rows[r] || [];
-      const lower = row.map(c => String(c).trim().toLowerCase());
-      if (lower.includes('name') && (lower.includes('no') || lower.includes('no.'))) {
-        headerRowIdx = r;
-        nameCol    = lower.indexOf('name');
-        // Find actual hours column
-        const actualIdx = lower.findIndex(h => h.includes('actual') || h.includes('work hour') || h.includes('real'));
-        if (actualIdx >= 0) actualCol = actualIdx;
-        // Find AB (absent) column
-        const abIdx = row.findIndex(c => String(c).trim().toUpperCase() === 'AB');
-        if (abIdx >= 0) abCol = abIdx;
+      // Full pattern: 2026/01/28 ~ 01/31
+      const m = rowStr.match(/(\d{4})\/(\d{2})\/(\d{2})\s*~\s*(?:\d{2}\/)?(\d{2})/);
+      if (m) {
+        year = m[1]; startMonth = m[2]; startDay = m[3]; endDay = m[4];
+        const startDate = `${year}-${startMonth}-${startDay.padStart(2, '0')}`;
+        const endDate   = `${year}-${startMonth}-${endDay.padStart(2, '0')}`;
+        dateRange = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
         break;
       }
     }
+    if (!year) return null;
 
-    const dataStart = headerRowIdx >= 0 ? headerRowIdx + 1 : 4;
-    // Get times from Logs sheet keyed by staff No. (e.g. "1", "2", "4")
-    // This is more reliable than per-person sheets (which may be corrupt/unnamed in some exports)
-    let timesMap = {};
-    try { timesMap = extractTimesFromLogsSheet(wb); } catch (e) { /* fall through */ }
+    // Find header row (contains "Name" and "No")
+    let nameCol = 1;
+    for (let r = 0; r < Math.min(8, rows.length); r++) {
+      const lower = (rows[r] || []).map(c => String(c).trim().toLowerCase());
+      if (lower.includes('name') && (lower.includes('no') || lower.includes('no.'))) {
+        nameCol = lower.indexOf('name'); break;
+      }
+    }
+    const dataStart = 4; // rows 0-3 are always headers
 
-    const records = [];
+    // Build staff list from Summary
+    const staffInFile = []; // [{ noVal, rawName, staffId, staffName }]
     for (let r = dataStart; r < rows.length; r++) {
       const row = rows[r] || [];
       const noVal   = String(row[0] || '').trim();
       const rawName = String(row[nameCol] || '').trim();
-
       if (!rawName) continue;
-      // Skip summary/total rows (No must be a small positive integer)
       const noNum = parseFloat(noVal);
       if (isNaN(noNum) || noNum <= 0 || noNum > 9000) continue;
-
-      // Look up times by staff No. (matches Logs sheet blocks "No : 1", "No : 2" etc.)
-      const times = timesMap[String(Math.round(noNum))];
-      const check_in  = times?.check_in  || null;
-      const lunch_out = times?.lunch_out || null;
-      const lunch_in  = times?.lunch_in  || null;
-      const check_out = times?.check_out || null;
-
-      // Present = has check-in time in Logs sheet; Absent = no punches recorded
-      const status = check_in ? 'present' : 'absent';
-
       const matched = matchStaffByName(rawName, allStaff);
-      records.push({ rawName, staffId: matched?.id || null, staffName: matched?.name || null, date, check_in, lunch_out, lunch_in, check_out, status });
+      staffInFile.push({ noVal: String(Math.round(noNum)), rawName, staffId: matched?.id || null, staffName: matched?.name || null });
+    }
+    if (staffInFile.length === 0) return null;
+
+    // Get all times from Logs sheet: { staffNo: { dateStr: times } }
+    let timesMap = {};
+    try { timesMap = extractTimesFromLogsSheet(wb); } catch (e) { /* fall through */ }
+
+    // Collect all dates that appear in the Logs (any staff has punches)
+    const allDates = new Set();
+    for (const staffNo of Object.keys(timesMap)) {
+      for (const d of Object.keys(timesMap[staffNo])) allDates.add(d);
+    }
+    const dates = [...allDates].sort();
+
+    // Build records: one per staff per date (present if has times, absent if date has other staff present)
+    const records = [];
+    for (const date of dates) {
+      for (const { noVal, rawName, staffId, staffName } of staffInFile) {
+        const times = timesMap[noVal]?.[date] || null;
+        const check_in  = times?.check_in  || null;
+        const lunch_out = times?.lunch_out || null;
+        const lunch_in  = times?.lunch_in  || null;
+        const check_out = times?.check_out || null;
+        const status = check_in ? 'present' : 'absent';
+        records.push({ rawName, staffId, staffName, date, check_in, lunch_out, lunch_in, check_out, status });
+      }
     }
 
     if (records.length === 0) return null;
-    return { sheetName, date, records };
+    const firstDate = dates[0] || `${year}-${startMonth}-${startDay.padStart(2, '0')}`;
+    return { sheetName: summaryName, date: firstDate, dateRange, dates, records };
   }
 
-  // Main detection: tries Summary sheet first, then falls back to Log/Detail sheet block parsing
-  function detectMachineFormat(wb, allStaff) {
-    // Strategy 1: Summary sheet (clean tabular data)
-    const summaryName = wb.SheetNames.find(n => /summary/i.test(n));
-    if (summaryName) {
-      const result = parseSummarySheet(wb, summaryName, allStaff);
-      if (result) return result;
-    }
-
-    // Strategy 2: Try every sheet for summary-style data
-    for (const name of wb.SheetNames) {
-      if (name === summaryName) continue;
-      const result = parseSummarySheet(wb, name, allStaff);
-      if (result) return result;
-    }
-
-    return null;
-  }
-
-  // parseMachineBlocks is now unused but kept for safety
-  function parseMachineBlocks(rows, date, allStaff) {
-    return [];
-  }
+  // parseMachineBlocks is unused — kept for safety
+  function parseMachineBlocks(rows, date, allStaff) { return []; }
 
   // POST /api/attendance/parse-machine — detect & preview thumbprint machine XLS
   router.post('/parse-machine', upload.single('file'), (req, res) => {
@@ -414,7 +425,7 @@ module.exports = function (db, notify) {
         return res.json({ isMachineFormat: false, sheets: wb.SheetNames, debugSheets, debugError });
       }
 
-      res.json({ isMachineFormat: true, date: detected.date, sheet: detected.sheetName, records: detected.records, allStaff });
+      res.json({ isMachineFormat: true, date: detected.date, dateRange: detected.dateRange, dates: detected.dates, sheet: detected.sheetName, records: detected.records, allStaff });
     } catch (e) {
       res.status(400).json({ error: 'Could not read file: ' + e.message });
     }
@@ -459,12 +470,13 @@ module.exports = function (db, notify) {
         imported++;
       }
 
-      db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance Machine Import', `${detected.date}: ${imported} imported, ${skipped} unmatched`);
+      const rangeLabel = detected.dateRange || detected.date;
+      db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance Machine Import', `${rangeLabel}: ${imported} imported, ${skipped} unmatched`);
       if (role === 'hr') {
-        notify(`📂 <b>Attendance Imported (Machine) by HR</b>\n📅 ${detected.date}\n✅ ${imported} records\n⚠️ Unmatched: ${unmatched.join(', ') || 'none'}`);
+        notify(`📂 <b>Attendance Imported (Machine) by HR</b>\n📅 ${rangeLabel}\n✅ ${imported} records\n⚠️ Unmatched: ${unmatched.join(', ') || 'none'}`);
       }
 
-      res.json({ imported, skipped, unmatched, date: detected.date });
+      res.json({ imported, skipped, unmatched, date: detected.date, dateRange: detected.dateRange || detected.date });
     } catch (e) {
       res.status(400).json({ error: 'Import failed: ' + e.message });
     }
