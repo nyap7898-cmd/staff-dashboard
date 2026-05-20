@@ -32,20 +32,22 @@ async function main() {
   app.use('/api/overview', require('./routes/overview')(db));
   app.use('/api/audit', require('./routes/audit')(db));
 
-  app.post('/api/auth/login', (req, res) => {
-    const { pin } = req.body;
-    if (pin === process.env.DIRECTOR_PIN) {
-      res.json({ success: true, role: 'director', name: 'Director' });
-    } else if (pin === process.env.HR_PIN) {
-      res.json({ success: true, role: 'hr', name: 'HR Manager' });
-    } else {
-      // Check staff PINs
-      const staff = db.prepare('SELECT id, name FROM staff WHERE staff_pin=? AND is_active=1').get(pin);
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { pin } = req.body;
+      if (pin === process.env.DIRECTOR_PIN) {
+        return res.json({ success: true, role: 'director', name: 'Director' });
+      } else if (pin === process.env.HR_PIN) {
+        return res.json({ success: true, role: 'hr', name: 'HR Manager' });
+      }
+      const staff = await db.prepare('SELECT id, name FROM staff WHERE staff_pin=? AND is_active=1').get(pin);
       if (staff) {
         res.json({ success: true, role: 'staff', name: staff.name, staff_id: staff.id });
       } else {
         res.status(401).json({ success: false, message: 'Invalid PIN' });
       }
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
     }
   });
 

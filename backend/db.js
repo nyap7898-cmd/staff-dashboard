@@ -1,16 +1,21 @@
-const initSqlJs = require('sql.js');
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
-// In production (Railway), DB_PATH env var points to the persistent volume
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'staff.db');
+let pool;
 
-// Statement wrapper — gives better-sqlite3-like .run() / .get() / .all()
+// Convert SQLite-style SQL to PostgreSQL
+function toPostgres(sql) {
+  let i = 0;
+  // Replace ? placeholders with $1, $2, ...
+  sql = sql.replace(/\?/g, () => `$${++i}`);
+  // Convert substr(col, 1, 4) to LEFT(col, 4)
+  sql = sql.replace(/\bsubstr\(([^,]+),\s*1,\s*4\)/gi, 'LEFT($1, 4)');
+  return sql;
+}
+
 class Statement {
-  constructor(sqlDb, sql, dbWrapper) {
-    this._sqlDb = sqlDb;
+  constructor(pool, sql) {
+    this._pool = pool;
     this._sql = sql;
-    this._dbWrapper = dbWrapper;
   }
 
   _params(args) {
@@ -19,94 +24,61 @@ class Statement {
     return args;
   }
 
-  run(...args) {
+  async run(...args) {
     const p = this._params(args);
-    this._sqlDb.run(this._sql, p);
-    let lastInsertRowid = null;
+    const wasIgnore = /INSERT\s+OR\s+IGNORE/i.test(this._sql);
+    let sql = this._sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
+    sql = toPostgres(sql);
+    if (/^\s*INSERT/i.test(sql)) {
+      sql += wasIgnore ? ' ON CONFLICT DO NOTHING RETURNING id' : ' RETURNING id';
+    }
     try {
-      const res = this._sqlDb.exec('SELECT last_insert_rowid()');
-      if (res.length) lastInsertRowid = res[0].values[0][0];
-    } catch {}
-    this._dbWrapper._save();
-    return { lastInsertRowid };
-  }
-
-  get(...args) {
-    const p = this._params(args);
-    const stmt = this._sqlDb.prepare(this._sql);
-    try {
-      stmt.bind(p);
-      return stmt.step() ? stmt.getAsObject() : undefined;
-    } finally {
-      stmt.free();
+      const result = await this._pool.query(sql, p);
+      return { lastInsertRowid: result.rows[0]?.id || null };
+    } catch (e) {
+      if (e.code === '23505') return { lastInsertRowid: null }; // unique violation
+      throw e;
     }
   }
 
-  all(...args) {
+  async get(...args) {
     const p = this._params(args);
-    const stmt = this._sqlDb.prepare(this._sql);
-    try {
-      stmt.bind(p);
-      const rows = [];
-      while (stmt.step()) rows.push(stmt.getAsObject());
-      return rows;
-    } finally {
-      stmt.free();
-    }
+    const sql = toPostgres(this._sql);
+    const result = await this._pool.query(sql, p);
+    return result.rows[0];
+  }
+
+  async all(...args) {
+    const p = this._params(args);
+    const sql = toPostgres(this._sql);
+    const result = await this._pool.query(sql, p);
+    return result.rows;
   }
 }
 
-// DB wrapper — thin layer over sql.js Database
 class DBWrapper {
-  constructor(sqlDb) {
-    this._db = sqlDb;
-  }
-
-  exec(sql) {
-    this._db.exec(sql);
-    this._save();
-    return this;
+  constructor(pool) {
+    this._pool = pool;
   }
 
   prepare(sql) {
-    return new Statement(this._db, sql, this);
+    return new Statement(this._pool, sql);
   }
 
-  _save() {
-    try {
-      const data = this._db.export();
-      fs.writeFileSync(DB_PATH, Buffer.from(data));
-    } catch (e) {
-      console.error('DB save error:', e.message);
-    }
+  async exec(sql) {
+    await this._pool.query(sql);
   }
+
+  // Convenience shortcuts: db.all(sql, ...params), db.get(sql, ...params), db.run(sql, ...params)
+  async all(sql, ...args) { return this.prepare(sql).all(...args); }
+  async get(sql, ...args) { return this.prepare(sql).get(...args); }
+  async run(sql, ...args) { return this.prepare(sql).run(...args); }
 }
 
-async function init() {
-  const SQL = await initSqlJs();
-
-  let sqlDb;
-  if (fs.existsSync(DB_PATH)) {
-    const buf = fs.readFileSync(DB_PATH);
-    sqlDb = new SQL.Database(buf);
-  } else {
-    sqlDb = new SQL.Database();
-  }
-
-  const db = new DBWrapper(sqlDb);
-  createTables(db);
-
-  // Seed if empty
-  const count = db.prepare('SELECT COUNT(*) as c FROM staff').get();
-  if (count.c === 0) seedData(db);
-
-  return db;
-}
-
-function createTables(db) {
-  db._db.exec(`
+async function createTables(pool) {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS staff (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       ic_number TEXT,
       email TEXT,
@@ -118,11 +90,12 @@ function createTables(db) {
       mc_entitlement INTEGER DEFAULT 14,
       annual_opening_used INTEGER DEFAULT 0,
       mc_opening_used INTEGER DEFAULT 0,
-      is_active INTEGER DEFAULT 1
+      is_active INTEGER DEFAULT 1,
+      staff_pin TEXT
     );
 
     CREATE TABLE IF NOT EXISTS attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       staff_id INTEGER REFERENCES staff(id),
       date TEXT NOT NULL,
       check_in TEXT,
@@ -135,7 +108,7 @@ function createTables(db) {
     );
 
     CREATE TABLE IF NOT EXISTS leave_requests (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       staff_id INTEGER REFERENCES staff(id),
       leave_type TEXT CHECK(leave_type IN ('annual','mc','emergency','unpaid','maternity','paternity')),
       start_date TEXT NOT NULL,
@@ -143,38 +116,27 @@ function createTables(db) {
       days REAL NOT NULL,
       reason TEXT,
       document_path TEXT,
+      document_data TEXT,
+      document_mime TEXT,
+      document_name TEXT,
+      half_day_period TEXT,
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
-      applied_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      applied_at TEXT,
       decided_at TEXT,
       director_notes TEXT
     );
 
     CREATE TABLE IF NOT EXISTS audit_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+      id SERIAL PRIMARY KEY,
+      timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
       role TEXT NOT NULL,
       action TEXT NOT NULL,
       details TEXT
     );
   `);
-  // Add new columns to existing DBs (safe — ignored if already exist)
-  try { db._db.exec(`ALTER TABLE staff ADD COLUMN annual_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE staff ADD COLUMN mc_opening_used INTEGER DEFAULT 0`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_data TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_mime TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN document_name TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE leave_requests ADD COLUMN half_day_period TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE staff ADD COLUMN staff_pin TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE attendance ADD COLUMN lunch_out TEXT`); db._save(); } catch {}
-  try { db._db.exec(`ALTER TABLE attendance ADD COLUMN lunch_in TEXT`); db._save(); } catch {}
 }
 
-function seedData(db) {
-  const ins = db.prepare(`
-    INSERT INTO staff (name, ic_number, email, phone, department, job_title, date_joined, annual_entitlement, mc_entitlement)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
+async function seedData(pool) {
   const staffList = [
     ['Ahmad Nizam', '880512-14-5678', 'ahmad.nizam@moonface.com', '0112-3456789', 'Administration', 'Admin Executive', '2020-03-15', 15, 14],
     ['Siti Rahimah', '910823-10-2345', 'siti.rahimah@moonface.com', '0123-4567890', 'Human Resources', 'HR Officer', '2019-07-01', 15, 14],
@@ -187,14 +149,13 @@ function seedData(db) {
 
   const ids = [];
   for (const s of staffList) {
-    const r = ins.run(...s);
-    ids.push(r.lastInsertRowid);
+    const r = await pool.query(
+      `INSERT INTO staff (name,ic_number,email,phone,department,job_title,date_joined,annual_entitlement,mc_entitlement)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, s
+    );
+    ids.push(r.rows[0].id);
   }
 
-  const insAtt = db.prepare(`
-    INSERT OR IGNORE INTO attendance (staff_id, date, check_in, check_out, status, notes)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
   const today = new Date();
   for (let d = 6; d >= 0; d--) {
     const date = new Date(today);
@@ -205,27 +166,56 @@ function seedData(db) {
       const sid = ids[i];
       const rand = (sid + d) % 10;
       if (rand === 0 && d > 0) {
-        insAtt.run(sid, dateStr, null, null, 'absent', 'No reason given');
+        await pool.query(`INSERT INTO attendance (staff_id,date,status,notes) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [sid, dateStr, 'absent', 'No reason given']);
       } else if (rand === 1 && d > 1) {
-        insAtt.run(sid, dateStr, null, null, 'on_leave', 'Annual leave');
+        await pool.query(`INSERT INTO attendance (staff_id,date,status,notes) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [sid, dateStr, 'on_leave', 'Annual leave']);
       } else {
         const ci = `0${8 + (rand % 2)}:${rand % 2 === 0 ? '55' : '10'}`;
         const co = '17:' + (rand % 2 === 0 ? '30' : '45');
-        insAtt.run(sid, dateStr, ci, co, 'present', null);
+        await pool.query(`INSERT INTO attendance (staff_id,date,check_in,check_out,status) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [sid, dateStr, ci, co, 'present']);
       }
     }
   }
 
-  const insLeave = db.prepare(`
-    INSERT INTO leave_requests (staff_id, leave_type, start_date, end_date, days, reason, status, applied_at, decided_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
   const todayStr = today.toISOString().split('T')[0];
-  insLeave.run(ids[0], 'annual', '2026-03-10', '2026-03-12', 3, 'Family vacation', 'approved', '2026-03-01', '2026-03-02');
-  insLeave.run(ids[2], 'mc', '2026-04-05', '2026-04-06', 2, 'Fever and flu', 'approved', '2026-04-05', '2026-04-05');
-  insLeave.run(ids[4], 'annual', '2026-04-01', '2026-04-03', 3, 'Personal matters', 'approved', '2026-03-25', '2026-03-26');
-  insLeave.run(ids[1], 'annual', '2026-04-20', '2026-04-22', 3, 'Wedding ceremony', 'pending', todayStr, null);
-  insLeave.run(ids[5], 'emergency', '2026-04-17', '2026-04-17', 1, 'Family emergency', 'pending', todayStr, null);
+  const leaves = [
+    [ids[0], 'annual', '2026-03-10', '2026-03-12', 3, 'Family vacation', 'approved', '2026-03-01', '2026-03-02'],
+    [ids[2], 'mc', '2026-04-05', '2026-04-06', 2, 'Fever and flu', 'approved', '2026-04-05', '2026-04-05'],
+    [ids[4], 'annual', '2026-04-01', '2026-04-03', 3, 'Personal matters', 'approved', '2026-03-25', '2026-03-26'],
+    [ids[1], 'annual', '2026-04-20', '2026-04-22', 3, 'Wedding ceremony', 'pending', todayStr, null],
+    [ids[5], 'emergency', '2026-04-17', '2026-04-17', 1, 'Family emergency', 'pending', todayStr, null],
+  ];
+  for (const l of leaves) {
+    await pool.query(
+      `INSERT INTO leave_requests (staff_id,leave_type,start_date,end_date,days,reason,status,applied_at,decided_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, l
+    );
+  }
+}
+
+async function init() {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('DATABASE_URL environment variable is required');
+
+  pool = new Pool({
+    connectionString,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
+  await createTables(pool);
+
+  const count = await pool.query('SELECT COUNT(*)::int as c FROM staff');
+  if (count.rows[0].c === 0) {
+    await seedData(pool);
+    console.log('Database seeded with initial data');
+  }
+
+  const db = new DBWrapper(pool);
+  console.log('PostgreSQL database connected');
+  return db;
 }
 
 module.exports = { init };

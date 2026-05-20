@@ -8,54 +8,62 @@ const upload = multer({ storage: multer.memoryStorage() });
 module.exports = function (db, notify) {
   const router = express.Router();
 
-  router.get('/', (req, res) => {
-    const date = req.query.date || new Date().toISOString().split('T')[0];
-    const staff = db.prepare('SELECT * FROM staff WHERE is_active = 1 ORDER BY name').all();
-    const attRows = db.prepare('SELECT * FROM attendance WHERE date = ?').all(date);
-    const attMap = {};
-    for (const r of attRows) attMap[r.staff_id] = r;
+  router.get('/', async (req, res) => {
+    try {
+      const date = req.query.date || new Date().toISOString().split('T')[0];
+      const staff = await db.all('SELECT * FROM staff WHERE is_active = 1 ORDER BY name');
+      const attRows = await db.all('SELECT * FROM attendance WHERE date = ?', date);
+      const attMap = {};
+      for (const r of attRows) attMap[r.staff_id] = r;
 
-    const records = staff.map(s => ({
-      id: attMap[s.id]?.id || null,
-      staff_id: s.id,
-      name: s.name,
-      department: s.department,
-      date,
-      check_in:   attMap[s.id]?.check_in   || null,
-      lunch_out:  attMap[s.id]?.lunch_out   || null,
-      lunch_in:   attMap[s.id]?.lunch_in    || null,
-      check_out:  attMap[s.id]?.check_out   || null,
-      status: attMap[s.id]?.status || null,
-      notes: attMap[s.id]?.notes || null,
-    }));
+      const records = staff.map(s => ({
+        id: attMap[s.id]?.id || null,
+        staff_id: s.id,
+        name: s.name,
+        department: s.department,
+        date,
+        check_in:   attMap[s.id]?.check_in   || null,
+        lunch_out:  attMap[s.id]?.lunch_out   || null,
+        lunch_in:   attMap[s.id]?.lunch_in    || null,
+        check_out:  attMap[s.id]?.check_out   || null,
+        status: attMap[s.id]?.status || null,
+        notes: attMap[s.id]?.notes || null,
+      }));
 
-    res.json(records);
+      res.json(records);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
-  router.post('/', (req, res) => {
-    const { staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes } = req.body;
-    const role = req.headers['x-user-role'] || 'unknown';
+  router.post('/', async (req, res) => {
+    try {
+      const { staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes } = req.body;
+      const role = req.headers['x-user-role'] || 'unknown';
 
-    const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(staff_id, date);
-    if (existing) {
-      db.prepare(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`)
-        .run(check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null, existing.id);
-    } else {
-      db.prepare(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`)
-        .run(staff_id, date, check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null);
+      const existing = await db.get('SELECT id FROM attendance WHERE staff_id=? AND date=?', staff_id, date);
+      if (existing) {
+        await db.run(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`,
+          check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null, existing.id);
+      } else {
+        await db.run(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`,
+          staff_id, date, check_in || null, lunch_out || null, lunch_in || null, check_out || null, status, notes || null);
+      }
+
+      const staffRow = await db.get('SELECT name FROM staff WHERE id=?', staff_id);
+      const staffName = staffRow ? staffRow.name : `Staff #${staff_id}`;
+      const details = `${staffName} | ${date} | ${status}${check_in ? ` | In: ${check_in}` : ''}${check_out ? ` | Out: ${check_out}` : ''}`;
+
+      await db.run('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)', role, 'Attendance Edit', details);
+
+      if (role === 'hr') {
+        notify(`⚠️ <b>Attendance Modified by HR</b>\n👤 ${staffName}\n📅 ${date}\n📌 Status: ${status}${check_in ? `\n🕘 In: ${check_in}` : ''}${check_out ? ` | Out: ${check_out}` : ''}`);
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
-
-    const staffRow = db.prepare('SELECT name FROM staff WHERE id=?').get(staff_id);
-    const staffName = staffRow ? staffRow.name : `Staff #${staff_id}`;
-    const details = `${staffName} | ${date} | ${status}${check_in ? ` | In: ${check_in}` : ''}${check_out ? ` | Out: ${check_out}` : ''}`;
-
-    db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance Edit', details);
-
-    if (role === 'hr') {
-      notify(`⚠️ <b>Attendance Modified by HR</b>\n👤 ${staffName}\n📅 ${date}\n📌 Status: ${status}${check_in ? `\n🕘 In: ${check_in}` : ''}${check_out ? ` | Out: ${check_out}` : ''}`);
-    }
-
-    res.json({ success: true });
   });
 
   // POST /api/attendance/parse-file — parse uploaded file, return rows + columns
@@ -102,7 +110,7 @@ module.exports = function (db, notify) {
   });
 
   // POST /api/attendance/import — import mapped data
-  router.post('/import', upload.single('file'), (req, res) => {
+  router.post('/import', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const { nameCol, dateCol, checkInCol, checkOutCol } = req.body;
@@ -123,7 +131,7 @@ module.exports = function (db, notify) {
       }
 
       const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => String(c).trim() !== ''));
-      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const allStaff = await db.all('SELECT id, name FROM staff WHERE is_active=1');
 
       // Fuzzy name match
       function matchStaff(nameStr) {
@@ -197,19 +205,19 @@ module.exports = function (db, notify) {
         const check_out = oc !== null ? parseTime(row[oc]) : null;
         const status = check_in ? 'present' : 'absent';
 
-        const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(staff.id, date);
+        const existing = await db.get('SELECT id FROM attendance WHERE staff_id=? AND date=?', staff.id, date);
         if (existing) {
-          db.prepare(`UPDATE attendance SET check_in=?, check_out=?, status=?, notes=? WHERE id=?`)
-            .run(check_in, check_out, status, 'Imported from file', existing.id);
+          await db.run(`UPDATE attendance SET check_in=?, check_out=?, status=?, notes=? WHERE id=?`,
+            check_in, check_out, status, 'Imported from file', existing.id);
         } else {
-          db.prepare(`INSERT INTO attendance (staff_id, date, check_in, check_out, status, notes) VALUES (?,?,?,?,?,?)`)
-            .run(staff.id, date, check_in, check_out, status, 'Imported from file');
+          await db.run(`INSERT INTO attendance (staff_id, date, check_in, check_out, status, notes) VALUES (?,?,?,?,?,?)`,
+            staff.id, date, check_in, check_out, status, 'Imported from file');
         }
         imported++;
       }
 
       const details = `File import: ${imported} records imported, ${skipped} skipped, ${noMatch} unmatched`;
-      db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance File Import', details);
+      await db.run('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)', role, 'Attendance File Import', details);
 
       if (role === 'hr') {
         notify(`📂 <b>Attendance File Imported by HR</b>\n✅ ${imported} records imported\n⚠️ ${noMatch} names not matched\n🗂️ ${[...unmatched].slice(0,3).join(', ')}${unmatched.size > 3 ? '...' : ''}`);
@@ -398,11 +406,11 @@ module.exports = function (db, notify) {
   function parseMachineBlocks(rows, date, allStaff) { return []; }
 
   // POST /api/attendance/parse-machine — detect & preview thumbprint machine XLS
-  router.post('/parse-machine', upload.single('file'), (req, res) => {
+  router.post('/parse-machine', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const allStaff = await db.all('SELECT id, name FROM staff WHERE is_active=1');
 
       // Attempt detection and collect debug info
       let detected = null;
@@ -432,12 +440,12 @@ module.exports = function (db, notify) {
   });
 
   // POST /api/attendance/import-machine — import thumbprint machine XLS
-  router.post('/import-machine', upload.single('file'), (req, res) => {
+  router.post('/import-machine', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const role = req.headers['x-user-role'] || 'unknown';
     try {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
-      const allStaff = db.prepare('SELECT id, name FROM staff WHERE is_active=1').all();
+      const allStaff = await db.all('SELECT id, name FROM staff WHERE is_active=1');
       const detected = detectMachineFormat(wb, allStaff);
       if (!detected) return res.status(400).json({ error: 'Not a recognised machine format' });
 
@@ -459,19 +467,19 @@ module.exports = function (db, notify) {
         }
         if (!rec.staffId) { unmatched.push(rec.rawName); skipped++; continue; }
 
-        const existing = db.prepare('SELECT id FROM attendance WHERE staff_id=? AND date=?').get(rec.staffId, rec.date);
+        const existing = await db.get('SELECT id FROM attendance WHERE staff_id=? AND date=?', rec.staffId, rec.date);
         if (existing) {
-          db.prepare(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`)
-            .run(rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine', existing.id);
+          await db.run(`UPDATE attendance SET check_in=?, lunch_out=?, lunch_in=?, check_out=?, status=?, notes=? WHERE id=?`,
+            rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine', existing.id);
         } else {
-          db.prepare(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`)
-            .run(rec.staffId, rec.date, rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine');
+          await db.run(`INSERT INTO attendance (staff_id, date, check_in, lunch_out, lunch_in, check_out, status, notes) VALUES (?,?,?,?,?,?,?,?)`,
+            rec.staffId, rec.date, rec.check_in, rec.lunch_out || null, rec.lunch_in || null, rec.check_out, rec.status, 'Thumbprint machine');
         }
         imported++;
       }
 
       const rangeLabel = detected.dateRange || detected.date;
-      db.prepare('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)').run(role, 'Attendance Machine Import', `${rangeLabel}: ${imported} imported, ${skipped} unmatched`);
+      await db.run('INSERT INTO audit_log (role, action, details) VALUES (?,?,?)', role, 'Attendance Machine Import', `${rangeLabel}: ${imported} imported, ${skipped} unmatched`);
       if (role === 'hr') {
         notify(`📂 <b>Attendance Imported (Machine) by HR</b>\n📅 ${rangeLabel}\n✅ ${imported} records\n⚠️ Unmatched: ${unmatched.join(', ') || 'none'}`);
       }
