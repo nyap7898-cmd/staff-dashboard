@@ -17,7 +17,7 @@ services:
       - key: HR_PIN
         value: 5678
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
+        value: 8753672048:AAGQpilIAcs92TdZBk78vP424Y297XVOjak
       - key: TELEGRAM_CHAT_ID
         value: 1094478911
 
